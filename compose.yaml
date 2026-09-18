@@ -10,3 +10,14 @@ services:
       - "3550:3550"
     environment:
       PORT: "3550"
+
+  shippingservice:
+    build:
+      context: ./src/shippingservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/shippingservice:/src
+    ports:
+      - "50051:50051"
+    environment:
+      PORT: "50051"

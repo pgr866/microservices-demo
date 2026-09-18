@@ -2,12 +2,6 @@
 
 The Shipping service provides price quote, tracking IDs, and the impression of order fulfillment & shipping processes.
 
-## Local
-
-Run the following command to restore dependencies to `vendor/` directory:
-
-    dep ensure --vendor-only
-
 ## Build
 
 From `src/shippingservice`, run:
@@ -16,8 +10,18 @@ From `src/shippingservice`, run:
 docker build ./
 ```
 
-## Test
+## Testing
 
+```bash
+go test -v ./...
+
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+go tool cover -html=coverage.out -o coverage.html
 ```
-go test .
+
+## Linting
+
+```bash
+golangci-lint run ./...
 ```

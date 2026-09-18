@@ -21,7 +21,8 @@
 - ✅ Tarea 1 — Método de trabajo: fork incremental (decidido).
 - ✅ Tarea 2 — Limpieza del fork: 56 ficheros borrados, **commiteado** en `eef36dbb` ("chore: remove Google Cloud–specific tooling and out-of-scope service").
 - ✅ Tarea 3 — Alcance del TFM documentado.
-- ⏳ Tarea 4 — validación local de microservicios: en curso. `productcatalogservice` ya revisado a fondo (referencia para el resto, quedan 10). Incluye escribir tests para los 6 microservicios sin cobertura — la investigación de qué testear ya está hecha a fondo, el código de los tests todavía no está escrito.
+- ⏳ Tarea 4 — validación local de microservicios: en curso. `productcatalogservice` y `shippingservice` ya revisados a fondo (el primero sirve de plantilla de referencia, el segundo confirma el patrón; quedan 9). Incluye escribir tests para los 6 microservicios sin cobertura — la investigación de qué testear ya está hecha a fondo, el código de los tests todavía no está escrito.
+- **Nota de git (desde esta ronda de revisión):** todo el trabajo de la Tarea 4 en adelante se commitea en la rama `refactor/local-microservice-validation`, no directamente en `main`. `main` se mantiene igual que antes de empezar el TFM (en `b9a978db`, "Add GKE labels") hasta que este trabajo esté listo para fusionarse vía PR — por eso `eef36dbb` y los commits de microservicios **no aparecen en `main`**, solo en esa rama.
 - ⏳ Todo lo demás (tareas 5-15) — decidido en diseño, **nada implementado todavía**.
 - **Regla de oro para el orden de ejecución real:** primero todo lo que no cuesta dinero. Eso incluye las Tareas 4-6 (validación local: microservicios, Kubernetes con `kind`, Terraform) y la Tarea 7 (pipeline de CI, que no toca Azure salvo un matiz — ver esa tarea). El primer `terraform apply` real contra Azure (Tareas 11 y 12) es deliberadamente uno de los últimos pasos, no el primero.
 
@@ -39,7 +40,7 @@
 
 ---
 
-## Tarea 2 — Auditar y limpiar el fork ✅ (commit `eef36dbb`)
+## Tarea 2 — Auditar y limpiar el fork ✅ (commit `eef36dbb`, rama `refactor/local-microservice-validation`)
 
 ### Borrado definitivamente (56 rutas, sin ningún valor ni como ejemplo)
 
@@ -89,8 +90,12 @@ Cubierto por la sección "Resumen del proyecto" (arriba) y las tareas 7-15 de es
 - **emailservice (Python)**: añadir pytest + pytest-cov (dependencia de test separada, no en `requirements.in` de producción). Único punto testeable real: `template.render(order=...)` de Jinja2 con un `order` de mentira — la clase `EmailService` real nunca se instancia en producción (siempre modo `DummyEmailService`), no hay más lógica de negocio que testear ahí.
 - **recommendationservice (Python)**: añadir pytest. Testear `ListRecommendations`: filtrado (`set(product_ids) - set(request.product_ids)`) y el tope `min(max_responses, num_products)`, con un `product_catalog_stub` mockeado a mano.
 
-**`productcatalogservice` — ya revisado a fondo, sirve de plantilla de referencia para el resto de los 10** (este ya tenía tests propios, así que su pase no incluyó "escribirlos", solo confirmarlos en verde — el resto del checklist sí aplica entero):
-- Código y Dockerfile limpios de Google Cloud, tests en verde, linter corriendo, Dockerfile llevado a nivel de producción (digest fijado + `nonroot`), `Dockerfile.dev` con `air` para recarga en caliente. Detalle completo de cada paso en el historial de conversación; lo que queda pendiente de ese repaso se anota abajo.
+**`productcatalogservice` y `shippingservice` — ya revisados a fondo, sirven de plantilla de referencia para los 9 restantes** (los dos ya tenían tests propios, así que su pase no incluyó "escribirlos", solo confirmarlos en verde — el resto del checklist sí aplica entero):
+- Código y Dockerfile limpios de Google Cloud, tests en verde, linter corriendo (0 issues en `shippingservice`; 4 dejados a propósito en `productcatalogservice` como demostración de que el linter funciona, ver más abajo), Dockerfile llevado a nivel de producción (digest fijado + `nonroot`), `Dockerfile.dev` con `air` para recarga en caliente. Detalle completo de cada paso en el historial de conversación; lo que queda pendiente de ese repaso se anota abajo.
+
+**Nota (`shippingservice`, mismo pase que `productcatalogservice`):** además del Profiler (mismo patrón GCP ya conocido), tenía código muerto propio sin relación con GCP: `initTracing()`/`initStats()` eran TODOs nunca implementados, pero `main()` igualmente logueaba mensajes de "tracing enabled" enlazando a un issue de GitHub ya cerrado; una rama `if/else` sobre `DISABLE_STATS` cuyas dos ramas hacían exactamente lo mismo; y un import heredado (`golang.org/x/net/context`, previo a que `context` existiera en la librería estándar de Go) que al quitarlo dejó caer `golang.org/x/net` de dependencia directa a indirecta. Todo eliminado. También se igualó el nivel de log (quitado un `logrus.DebugLevel` forzado que no tenía `productcatalogservice`, por consistencia).
+
+**Decisión (aplicada a ambos, `productcatalogservice` y `shippingservice`): reflexión gRPC (`reflection.Register`) apagada por defecto, encendida solo vía `ENABLE_REFLECTION=1` en `Dockerfile.dev`.** La reflexión deja que un cliente (`grpcurl`, Postman) descubra todos los métodos y el esquema de mensajes sin necesitar el `.proto` — cómodo para depurar, pero también *information disclosure* si un pod no autorizado llega a alcanzar el puerto. Directamente relevante para la comparativa A/B: en el Escenario A (sin NetworkPolicies) cualquier pod podría hacer reflexión sin esfuerzo; en el B, el aislamiento de red limita quién puede aprovecharlo. `shippingservice` la traía encendida sin condición de fábrica; `productcatalogservice` no la tenía en absoluto — ahora las dos se comportan igual. Revisar el mismo patrón en el resto de microservicios cuando llegue su turno.
 
 **Nota (hallazgo durante la validación de `productcatalogservice`):** el servicio traía código GCP-específico sin usar: Stackdriver Profiler (activado por defecto vía `cloud.google.com/go/profiler`, sin equivalente necesario — Prometheus/Grafana, Tarea 15, no hace profiling de función) y una ruta alternativa de carga de catálogo vía AlloyDB + Secret Manager (`ALLOYDB_CLUSTER_NAME`, nunca seteada en ningún manifiesto — el componente Kustomize `alloydb` ya estaba marcado como no usado en la Tarea 2). Se eliminó el código de ambas (funciones `initProfiling`, `getSecretPayload`, `loadCatalogFromAlloyDB` y las dependencias `cloud.google.com/go/profiler`, `cloud.google.com/go/alloydbconn`, `cloud.google.com/go/secretmanager`, `github.com/jackc/pgx/v5` de `go.mod`) en vez de migrarse a Azure: ninguna aporta a la infraestructura declarada (Tarea 8) ni al experimento (k6 + fault injection). Pendiente: revisar el mismo patrón (Profiler sobre todo) en el resto de microservicios durante esta tarea. La limpieza de la propia variable `DISABLE_PROFILER`, ya inútil, en `kubernetes-manifests/productcatalogservice.yaml` se deja para la Tarea 9 (nota ahí abajo), que es cuando tocan esos manifiestos de verdad — no antes.
 
@@ -173,7 +178,7 @@ Dos tracks en paralelo, disparados en cada Pull Request.
 
 **Pendientes de manifiestos detectados durante la Tarea 4 (revisar al tocar cada manifiesto, no antes):**
 - `kubernetes-manifests/productcatalogservice.yaml` setea `DISABLE_PROFILER: "1"`, variable que ya no lee ningún código (el Profiler se eliminó del fuente en la Tarea 4) — limpiar.
-- Añadir `securityContext: runAsNonRoot: true` (y valorar `readOnlyRootFilesystem: true`) en el pod de `productcatalogservice`, para que el manifiesto **exija** lo que su Dockerfile ya soporta desde la Tarea 4 (imagen `nonroot` desde `gcr.io/distroless/static:nonroot`) — encaja de forma natural en el Escenario B (blindado), y es revisable en el resto de microservicios según cada Dockerfile vaya quedando en el mismo estado.
+- Añadir `securityContext: runAsNonRoot: true` (y valorar `readOnlyRootFilesystem: true`) en los pods de `productcatalogservice` y `shippingservice`, para que el manifiesto **exija** lo que sus Dockerfiles ya soportan desde la Tarea 4 (imagen `nonroot` desde `gcr.io/distroless/static:nonroot`) — encaja de forma natural en el Escenario B (blindado), y es revisable en el resto de microservicios según cada Dockerfile vaya quedando en el mismo estado.
 
 ---
 
