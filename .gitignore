@@ -25,5 +25,6 @@ node_modules/
 obj/
 pkg/
 release/wi-kubernetes-manifests.yaml
+tmp/
 vendor/
 gha-creds-*.json

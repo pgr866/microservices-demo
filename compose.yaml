@@ -1,0 +1,12 @@
+# Local development only
+services:
+  productcatalogservice:
+    build:
+      context: ./src/productcatalogservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/productcatalogservice:/src
+    ports:
+      - "3550:3550"
+    environment:
+      PORT: "3550"

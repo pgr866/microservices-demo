@@ -1,9 +1,5 @@
 # productcatalogservice
 
-Run the following command to restore dependencies to `vendor/` directory:
-
-    go mod vendor
-
 ## Dynamic catalog reloading / artificial delay
 
 This service has a "dynamic catalog reloading" feature that is purposefully
@@ -36,3 +32,19 @@ This service has an `EXTRA_LATENCY` environment variable. This will inject a sle
 to the server.
 
 For example, use `EXTRA_LATENCY="5.5s"` to sleep for 5.5 seconds on every request.
+
+## Testing
+
+```bash
+go test -v ./...
+
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+go tool cover -html=coverage.out -o coverage.html
+```
+
+## Linting
+
+```bash
+golangci-lint run ./...
+```

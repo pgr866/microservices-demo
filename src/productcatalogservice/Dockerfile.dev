@@ -1,0 +1,6 @@
+# Local development only. Watches .go files and rebuilds/restarts on change.
+FROM golang:1.27.0-alpine
+RUN go install github.com/air-verse/air@latest
+WORKDIR /src
+ENV ENABLE_REFLECTION=1
+ENTRYPOINT ["air"]
