@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+const crypto = require('crypto');
 const cardValidator = require('simple-card-validator');
-const { v4: uuidv4 } = require('uuid');
 const pino = require('pino');
 
 const logger = pino({
@@ -82,5 +82,5 @@ module.exports = function charge (request) {
   logger.info(`Transaction processed: ${cardType} ending ${cardNumber.substr(-4)} \
     Amount: ${amount.currency_code}${amount.units}.${amount.nanos}`);
 
-  return { transaction_id: uuidv4() };
+  return { transaction_id: crypto.randomUUID() };
 };

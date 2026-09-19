@@ -21,3 +21,18 @@ services:
       - "50051:50051"
     environment:
       PORT: "50051"
+
+  paymentservice:
+    build:
+      context: ./src/paymentservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/paymentservice:/usr/src/app
+      - paymentservice_node_modules:/usr/src/app/node_modules
+    ports:
+      - "50052:50051"
+    environment:
+      PORT: "50051"
+
+volumes:
+  paymentservice_node_modules:

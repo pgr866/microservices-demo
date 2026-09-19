@@ -20,11 +20,13 @@
 *~
 bin/
 build/
+coverage/
 Dockerfile.pip
 node_modules/
 obj/
 pkg/
 release/wi-kubernetes-manifests.yaml
+reports/
 tmp/
 vendor/
 gha-creds-*.json
