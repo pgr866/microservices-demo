@@ -6,4 +6,11 @@ The Payment service charges the given credit card info (mock) with the given amo
 
 ```bash
 npm test
+npm run test:coverage
+```
+
+## Linting
+
+```bash
+npm run lint
 ```

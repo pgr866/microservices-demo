@@ -34,5 +34,18 @@ services:
     environment:
       PORT: "50051"
 
+  currencyservice:
+    build:
+      context: ./src/currencyservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/currencyservice:/usr/src/app
+      - currencyservice_node_modules:/usr/src/app/node_modules
+    ports:
+      - "7000:7000"
+    environment:
+      PORT: "7000"
+
 volumes:
   paymentservice_node_modules:
+  currencyservice_node_modules:
