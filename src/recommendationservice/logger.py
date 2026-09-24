@@ -16,7 +16,7 @@
 
 import logging
 import sys
-from pythonjsonlogger import jsonlogger
+from pythonjsonlogger import json as jsonlogger
 
 # TODO(yoshifumi) this class is duplicated since other Python services are
 # not sharing the modules for logging.

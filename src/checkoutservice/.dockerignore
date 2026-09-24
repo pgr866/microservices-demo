@@ -1,1 +1,4 @@
 vendor/
+*_test.go
+coverage.out
+coverage.html

@@ -30,7 +30,7 @@ class HipsterShopServer {
     };
 
     this.server = new grpc.Server();
-    this.loadAllProtos(protoRoot);
+    this.loadAllProtos();
   }
 
   /**
@@ -62,7 +62,6 @@ class HipsterShopServer {
       grpc.ServerCredentials.createInsecure(),
       function () {
         logger.info(`PaymentService gRPC server started on port ${port}`);
-        server.start();
       }
     );
   }
@@ -81,7 +80,7 @@ class HipsterShopServer {
     return grpc.loadPackageDefinition(packageDefinition);
   }
 
-  loadAllProtos(protoRoot) {
+  loadAllProtos() {
     const hipsterShopPackage = this.packages.hipsterShop.hipstershop;
     const healthPackage = this.packages.health.grpc.health.v1;
 

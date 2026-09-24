@@ -25,7 +25,7 @@ namespace cartservice.services
     {
         private ICartStore _cartStore { get; }
 
-        public HealthCheckService (ICartStore cartStore) 
+        public HealthCheckService(ICartStore cartStore)
         {
             _cartStore = cartStore;
         }
@@ -33,7 +33,8 @@ namespace cartservice.services
         public override Task<HealthCheckResponse> Check(HealthCheckRequest request, ServerCallContext context)
         {
             Console.WriteLine ("Checking CartService Health");
-            return Task.FromResult(new HealthCheckResponse {
+            return Task.FromResult(new HealthCheckResponse
+            {
                 Status = _cartStore.Ping() ? HealthCheckResponse.Types.ServingStatus.Serving : HealthCheckResponse.Types.ServingStatus.NotServing
             });
         }

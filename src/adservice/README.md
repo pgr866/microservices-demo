@@ -26,3 +26,18 @@ From `src/adservice/`, run:
 docker build ./
 ```
 
+## Testing
+
+```bash
+./gradlew test
+
+# Coverage report (build/reports/jacoco/test/html/index.html)
+./gradlew jacocoTestReport
+```
+
+## Linting
+
+```bash
+./gradlew checkstyleMain
+```
+

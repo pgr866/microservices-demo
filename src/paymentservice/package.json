@@ -5,23 +5,35 @@
   "repository": "https://github.com/GoogleCloudPlatform/microservices-demo",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint ."
   },
   "author": "Jonathan Lui",
   "license": "ISC",
+  "jest": {
+    "reporters": [
+      "default",
+      ["jest-junit", { "outputDirectory": "reports", "outputName": "junit.xml" }]
+    ],
+    "collectCoverageFrom": [
+      "*.js",
+      "!*.test.js",
+      "!eslint.config.js"
+    ]
+  },
   "dependencies": {
-    "@google-cloud/profiler": "8.0.1",
-    "@grpc/grpc-js": "1.14.4",
+    "@grpc/grpc-js": "1.14.5",
     "@grpc/proto-loader": "0.8.1",
-    "@opentelemetry/api": "1.9.1",
-    "@opentelemetry/exporter-otlp-grpc": "0.26.0",
-    "@opentelemetry/instrumentation-grpc": "0.222.0",
-    "@opentelemetry/sdk-trace-base": "2.11.0",
-    "@opentelemetry/sdk-node": "0.222.0",
-    "@opentelemetry/resources": "2.11.0",
-    "@opentelemetry/semantic-conventions": "1.43.0",
     "pino": "10.3.1",
-    "simple-card-validator": "^1.1.0",
-    "uuid": "^14.0.0"
+    "simple-card-validator": "^1.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
+    "jest": "^30.5.2",
+    "jest-junit": "^17.0.0",
+    "nodemon": "^3.1.14"
   }
 }

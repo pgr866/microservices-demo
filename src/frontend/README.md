@@ -1,5 +1,12 @@
 # frontend
 
-Run the following command to restore dependencies to `vendor/` directory:
+## Testing
 
-    dep ensure --vendor-only
+    go test -v ./...
+    go test -coverprofile=coverage.out $(go list ./... | grep -v /genproto)
+    go tool cover -func=coverage.out
+    go tool cover -html=coverage.out -o coverage.html
+
+## Linting
+
+    golangci-lint run ./...

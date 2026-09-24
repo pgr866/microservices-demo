@@ -71,10 +71,10 @@ spec:
           readOnlyRootFilesystem: true
         image: {{ .Values.images.repository }}/{{ .Values.paymentService.name }}:{{ .Values.images.tag | default .Chart.AppVersion }}
         ports:
-        - containerPort: 50051
+        - containerPort: 50052
         env:
         - name: PORT
-          value: "50051"
+          value: "50052"
         {{- if .Values.opentelemetryCollector.create }}
         - name: COLLECTOR_SERVICE_ADDR
           value: "{{ .Values.opentelemetryCollector.name }}:4317"
@@ -91,10 +91,10 @@ spec:
         {{- end }}
         readinessProbe:
           grpc:
-            port: 50051
+            port: 50052
         livenessProbe:
           grpc:
-            port: 50051
+            port: 50052
         resources:
           {{- toYaml .Values.paymentService.resources | nindent 10 }}
 ---
@@ -111,8 +111,8 @@ spec:
     app: {{ .Values.paymentService.name }}
   ports:
   - name: grpc
-    port: 50051
-    targetPort: 50051
+    port: 50052
+    targetPort: 50052
 {{- if .Values.networkPolicies.create }}
 ---
 apiVersion: networking.k8s.io/v1
@@ -133,7 +133,7 @@ spec:
         matchLabels:
           app: {{ .Values.checkoutService.name }}
     ports:
-     - port: 50051
+     - port: 50052
        protocol: TCP
   egress:
   - {}
@@ -183,6 +183,6 @@ spec:
         methods:
         - POST
         ports:
-        - "50051"
+        - "50052"
 {{- end }}
 {{- end }}

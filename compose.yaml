@@ -1,0 +1,226 @@
+# Local development only
+services:
+  productcatalogservice:
+    build:
+      context: ./src/productcatalogservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/productcatalogservice:/src
+    ports:
+      - "3550:3550"
+    environment:
+      PORT: "3550"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "3550"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  shippingservice:
+    build:
+      context: ./src/shippingservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/shippingservice:/src
+    ports:
+      - "50051:50051"
+    environment:
+      PORT: "50051"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "50051"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  paymentservice:
+    build:
+      context: ./src/paymentservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/paymentservice:/usr/src/app
+      - paymentservice_node_modules:/usr/src/app/node_modules
+    ports:
+      - "50052:50052"
+    environment:
+      PORT: "50052"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "50052"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  currencyservice:
+    build:
+      context: ./src/currencyservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/currencyservice:/usr/src/app
+      - currencyservice_node_modules:/usr/src/app/node_modules
+    ports:
+      - "7000:7000"
+    environment:
+      PORT: "7000"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7000"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  emailservice:
+    build:
+      context: ./src/emailservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/emailservice:/email_server
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  adservice:
+    build:
+      context: ./src/adservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/adservice:/app
+      - adservice_gradle_home:/root/.gradle
+    ports:
+      - "9555:9555"
+    environment:
+      PORT: "9555"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9555"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 90s
+
+  cartservice:
+    build:
+      context: ./src/cartservice/src
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/cartservice/src:/app
+      - cartservice_nuget_packages:/root/.nuget/packages
+    ports:
+      - "7070:7070"
+    healthcheck:
+      # dotnet/sdk (Debian-based) has no nc; bash's /dev/tcp pseudo-device
+      # is a builtin, so this needs no extra tooling in the image either.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/7070"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 60s
+
+  recommendationservice:
+    build:
+      context: ./src/recommendationservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/recommendationservice:/recommendationservice
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8081"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+    depends_on:
+      productcatalogservice:
+        condition: service_healthy
+
+  checkoutservice:
+    build:
+      context: ./src/checkoutservice
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/checkoutservice:/src
+    ports:
+      - "5050:5050"
+    environment:
+      PORT: "5050"
+      SHIPPING_SERVICE_ADDR: "shippingservice:50051"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+      CART_SERVICE_ADDR: "cartservice:7070"
+      CURRENCY_SERVICE_ADDR: "currencyservice:7000"
+      EMAIL_SERVICE_ADDR: "emailservice:8080"
+      PAYMENT_SERVICE_ADDR: "paymentservice:50052"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "5050"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+    depends_on:
+      shippingservice:
+        condition: service_healthy
+      productcatalogservice:
+        condition: service_healthy
+      cartservice:
+        condition: service_healthy
+      currencyservice:
+        condition: service_healthy
+      emailservice:
+        condition: service_healthy
+      paymentservice:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./src/frontend:/src
+    ports:
+      - "8082:8082"
+    environment:
+      PORT: "8082"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+      CURRENCY_SERVICE_ADDR: "currencyservice:7000"
+      CART_SERVICE_ADDR: "cartservice:7070"
+      RECOMMENDATION_SERVICE_ADDR: "recommendationservice:8081"
+      SHIPPING_SERVICE_ADDR: "shippingservice:50051"
+      CHECKOUT_SERVICE_ADDR: "checkoutservice:5050"
+      AD_SERVICE_ADDR: "adservice:9555"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/_healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+    depends_on:
+      productcatalogservice:
+        condition: service_healthy
+      currencyservice:
+        condition: service_healthy
+      cartservice:
+        condition: service_healthy
+      recommendationservice:
+        condition: service_healthy
+      shippingservice:
+        condition: service_healthy
+      checkoutservice:
+        condition: service_healthy
+      adservice:
+        condition: service_healthy
+
+volumes:
+  paymentservice_node_modules:
+  currencyservice_node_modules:
+  adservice_gradle_home:
+  cartservice_nuget_packages:

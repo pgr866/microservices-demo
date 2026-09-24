@@ -1,0 +1,6 @@
+# Local development only. Watches .cs files and rebuilds/restarts on change.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.100-noble
+ENV DOTNET_USE_POLLING_FILE_WATCHER=1 \
+    ASPNETCORE_HTTP_PORTS=7070
+WORKDIR /app
+ENTRYPOINT ["dotnet", "watch", "run", "--project", "cartservice.csproj", "--non-interactive"]

@@ -15,10 +15,9 @@
 package main
 
 import (
+	"context"
 	"regexp"
 	"testing"
-
-	"golang.org/x/net/context"
 
 	pb "github.com/GoogleCloudPlatform/microservices-demo/src/shippingservice/genproto"
 )

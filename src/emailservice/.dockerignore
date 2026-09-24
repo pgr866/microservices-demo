@@ -1,0 +1,9 @@
+test_*.py
+.pytest_cache
+.ruff_cache
+__pycache__
+*.pyc
+.coverage
+coverage
+htmlcov
+reports

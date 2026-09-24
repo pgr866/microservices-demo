@@ -27,7 +27,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         port = sys.argv[1]
     else:
-        port = "8080"
+        port = "8081"
 
     # set up server stub
     channel = grpc.insecure_channel('localhost:'+port)

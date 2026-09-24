@@ -3,6 +3,8 @@ plugins {
     id 'com.github.sherter.google-java-format' version '0.9'
     id 'idea'
     id 'application'
+    id 'jacoco'
+    id 'checkstyle'
 }
 
 repositories {
@@ -14,6 +16,12 @@ description = 'Ad Service'
 group = "adservice"
 version = "0.1.0-SNAPSHOT"
 
+application {
+    // Only used by `gradlew run` (local hot-reload, see Dockerfile.dev) — the production
+    // Dockerfile uses the custom `adService`/`adServiceClient` start scripts below instead.
+    mainClass = 'hipstershop.AdService'
+}
+
 def grpcVersion = "1.84.0"
 def jacksonCoreVersion = "2.22.2"
 def jacksonDatabindVersion = "2.22.2"
@@ -22,6 +30,7 @@ def protocVersion = "4.36.1"
 tasks.withType(JavaCompile) {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
+    options.compilerArgs << "-Xlint:deprecation"
 }
 
 ext {
@@ -39,7 +48,6 @@ dependencies {
                 "io.grpc:grpc-stub:${grpcVersion}",
                 "io.grpc:grpc-netty:${grpcVersion}",
                 "io.grpc:grpc-services:${grpcVersion}",
-                "io.grpc:grpc-census:${grpcVersion}",
                 "org.apache.logging.log4j:log4j-core:2.26.1",
                 "com.google.protobuf:protobuf-java:${protocVersion}"
 
@@ -47,6 +55,38 @@ dependencies {
                 "com.fasterxml.jackson.core:jackson-databind:${jacksonDatabindVersion}",
                 "io.netty:netty-tcnative-boringssl-static:2.0.84.Final"
     }
+
+    testImplementation platform("org.junit:junit-bom:5.11.4")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+}
+
+test {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+checkstyle {
+    toolVersion = "10.20.2"
+    configFile = file("checkstyle.xml")
+}
+
+// Lint only hand-written code — the `sourceSets` block above also feeds the
+// protobuf/gRPC generated Java sources to `main` (needed for compilation), but
+// those aren't ours to fix and shouldn't be linted.
+checkstyleMain {
+    source = fileTree("src/main/java")
+}
+
+checkstyleTest {
+    source = fileTree("src/test/java")
 }
 
 protobuf {
@@ -97,9 +137,6 @@ task adService(type: CreateStartScripts) {
     applicationName = 'AdService'
     outputDir = new File(project.buildDir, 'tmp')
     classpath = startScripts.classpath
-    // @TODO: https://github.com/GoogleCloudPlatform/microservices-demo/issues/2517
-    // defaultJvmOpts =
-    //          ["-agentpath:/opt/cprof/profiler_java_agent.so=-cprof_service=adservice,-cprof_service_version=1.0.0"]
 }
 
 task adServiceClient(type: CreateStartScripts) {
@@ -107,9 +144,6 @@ task adServiceClient(type: CreateStartScripts) {
     applicationName = 'AdServiceClient'
     outputDir = new File(project.buildDir, 'tmp')
     classpath = startScripts.classpath
-    // @TODO: https://github.com/GoogleCloudPlatform/microservices-demo/issues/2517
-    // defaultJvmOpts =
-    //          ["-agentpath:/opt/cprof/profiler_java_agent.so=-cprof_service=adserviceclient,-cprof_service_version=1.0.0"]
 }
 
 applicationDistribution.into('bin') {

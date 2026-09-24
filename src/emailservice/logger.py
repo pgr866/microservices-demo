@@ -16,13 +16,15 @@
 
 import logging
 import sys
-from pythonjsonlogger import jsonlogger
+
+from pythonjsonlogger import json as jsonlogger
+
 
 # TODO(yoshifumi) this class is duplicated since other Python services are
 # not sharing the modules for logging.
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
   def add_fields(self, log_record, record, message_dict):
-    super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
+    super().add_fields(log_record, record, message_dict)
     if not log_record.get('timestamp'):
       log_record['timestamp'] = record.created
     if log_record.get('severity'):

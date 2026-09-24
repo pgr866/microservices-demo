@@ -16,12 +16,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"html/template"
-	"io"
 	"math/rand"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -43,11 +40,10 @@ type platformDetails struct {
 }
 
 var (
-	frontendMessage  = strings.TrimSpace(os.Getenv("FRONTEND_MESSAGE"))
-	isCymbalBrand    = "true" == strings.ToLower(os.Getenv("CYMBAL_BRANDING"))
-	assistantEnabled = "true" == strings.ToLower(os.Getenv("ENABLE_ASSISTANT"))
-	templates        = template.Must(template.New("").
-				Funcs(template.FuncMap{
+	frontendMessage = strings.TrimSpace(os.Getenv("FRONTEND_MESSAGE"))
+	isCymbalBrand   = strings.ToLower(os.Getenv("CYMBAL_BRANDING")) == "true"
+	templates       = template.Must(template.New("").
+			Funcs(template.FuncMap{
 			"renderMoney":        renderMoney,
 			"renderCurrencyLogo": renderCurrencyLogo,
 		}).ParseGlob("templates/*.html"))
@@ -89,18 +85,12 @@ func (fe *frontendServer) homeHandler(w http.ResponseWriter, r *http.Request) {
 		ps[i] = productView{p, price}
 	}
 
-	// Set ENV_PLATFORM (default to local if not set; use env var if set; otherwise detect GCP, which overrides env)_
+	// Set ENV_PLATFORM (default to local if not set; use env var if set)
 	var env = os.Getenv("ENV_PLATFORM")
 	// Only override from env variable if set + valid env
-	if env == "" || stringinSlice(validEnvs, env) == false {
+	if env == "" || !stringinSlice(validEnvs, env) {
 		fmt.Println("env platform is either empty or invalid")
 		env = "local"
-	}
-	// Autodetect GCP
-	addrs, err := net.LookupHost("metadata.google.internal.")
-	if err == nil && len(addrs) >= 0 {
-		log.Debugf("Detected Google metadata server: %v, setting ENV_PLATFORM to GCP.", addrs)
-		env = "gcp"
 	}
 
 	log.Debugf("ENV_PLATFORM is: %s", env)
@@ -120,22 +110,23 @@ func (fe *frontendServer) homeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (plat *platformDetails) setPlatformDetails(env string) {
-	if env == "aws" {
+	switch env {
+	case "aws":
 		plat.provider = "AWS"
 		plat.css = "aws-platform"
-	} else if env == "onprem" {
+	case "onprem":
 		plat.provider = "On-Premises"
 		plat.css = "onprem-platform"
-	} else if env == "azure" {
+	case "azure":
 		plat.provider = "Azure"
 		plat.css = "azure-platform"
-	} else if env == "gcp" {
+	case "gcp":
 		plat.provider = "Google Cloud"
 		plat.css = "gcp-platform"
-	} else if env == "alibaba" {
+	case "alibaba":
 		plat.provider = "Alibaba Cloud"
 		plat.css = "alibaba-platform"
-	} else {
+	default:
 		plat.provider = "local"
 		plat.css = "local"
 	}
@@ -185,16 +176,6 @@ func (fe *frontendServer) productHandler(w http.ResponseWriter, r *http.Request)
 		Price *pb.Money
 	}{p, price}
 
-	// Fetch packaging info (weight/dimensions) of the product
-	// The packaging service is an optional microservice you can run as part of a Google Cloud demo.
-	var packagingInfo *PackagingInfo = nil
-	if isPackagingServiceConfigured() {
-		packagingInfo, err = httpGetPackagingInfo(id)
-		if err != nil {
-			fmt.Println("Failed to obtain product's packaging info:", err)
-		}
-	}
-
 	if err := templates.ExecuteTemplate(w, "product", injectCommonTemplateData(r, map[string]interface{}{
 		"ad":              fe.chooseAd(r.Context(), p.Categories, log),
 		"show_currency":   true,
@@ -202,7 +183,6 @@ func (fe *frontendServer) productHandler(w http.ResponseWriter, r *http.Request)
 		"product":         product,
 		"recommendations": recommendations,
 		"cart_size":       cartSize(cart),
-		"packagingInfo":   packagingInfo,
 	})); err != nil {
 		log.Println(err)
 	}
@@ -232,7 +212,7 @@ func (fe *frontendServer) addToCartHandler(w http.ResponseWriter, r *http.Reques
 		renderHTTPError(log, r, w, errors.Wrap(err, "failed to add to cart"), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("location", baseUrl + "/cart")
+	w.Header().Set("location", baseUrl+"/cart")
 	w.WriteHeader(http.StatusFound)
 }
 
@@ -244,7 +224,7 @@ func (fe *frontendServer) emptyCartHandler(w http.ResponseWriter, r *http.Reques
 		renderHTTPError(log, r, w, errors.Wrap(err, "failed to empty cart"), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("location", baseUrl + "/")
+	w.Header().Set("location", baseUrl+"/")
 	w.WriteHeader(http.StatusFound)
 }
 
@@ -400,21 +380,6 @@ func (fe *frontendServer) placeOrderHandler(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (fe *frontendServer) assistantHandler(w http.ResponseWriter, r *http.Request) {
-	currencies, err := fe.getCurrencies(r.Context())
-	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "could not retrieve currencies"), http.StatusInternalServerError)
-		return
-	}
-
-	if err := templates.ExecuteTemplate(w, "assistant", injectCommonTemplateData(r, map[string]interface{}{
-		"show_currency": false,
-		"currencies":    currencies,
-	})); err != nil {
-		log.Println(err)
-	}
-}
-
 func (fe *frontendServer) logoutHandler(w http.ResponseWriter, r *http.Request) {
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
 	log.Debug("logging out")
@@ -423,77 +388,8 @@ func (fe *frontendServer) logoutHandler(w http.ResponseWriter, r *http.Request) 
 		c.MaxAge = -1
 		http.SetCookie(w, c)
 	}
-	w.Header().Set("Location", baseUrl + "/")
+	w.Header().Set("Location", baseUrl+"/")
 	w.WriteHeader(http.StatusFound)
-}
-
-func (fe *frontendServer) getProductByID(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["ids"]
-	if id == "" {
-		return
-	}
-
-	p, err := fe.getProduct(r.Context(), id)
-	if err != nil {
-		return
-	}
-
-	jsonData, err := json.Marshal(p)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	w.Write(jsonData)
-	w.WriteHeader(http.StatusOK)
-}
-
-func (fe *frontendServer) chatBotHandler(w http.ResponseWriter, r *http.Request) {
-	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
-	type Response struct {
-		Message string `json:"message"`
-	}
-
-	type LLMResponse struct {
-		Content string         `json:"content"`
-		Details map[string]any `json:"details"`
-	}
-
-	var response LLMResponse
-
-	url := "http://" + fe.shoppingAssistantSvcAddr
-	req, err := http.NewRequest(http.MethodPost, url, r.Body)
-	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to create request"), http.StatusInternalServerError)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to send request"), http.StatusInternalServerError)
-		return
-	}
-
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to read response"), http.StatusInternalServerError)
-		return
-	}
-
-	fmt.Printf("%+v\n", body)
-	fmt.Printf("%+v\n", res)
-
-	err = json.Unmarshal(body, &response)
-	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to unmarshal body"), http.StatusInternalServerError)
-		return
-	}
-
-	// respond with the same message
-	json.NewEncoder(w).Encode(Response{Message: response.Content})
-
-	w.WriteHeader(http.StatusOK)
 }
 
 func (fe *frontendServer) setCurrencyHandler(w http.ResponseWriter, r *http.Request) {
@@ -556,7 +452,6 @@ func injectCommonTemplateData(r *http.Request, payload map[string]interface{}) m
 		"platform_css":      plat.css,
 		"platform_name":     plat.provider,
 		"is_cymbal_brand":   isCymbalBrand,
-		"assistant_enabled": assistantEnabled,
 		"deploymentDetails": deploymentDetailsMap,
 		"frontendMessage":   frontendMessage,
 		"currentYear":       time.Now().Year(),

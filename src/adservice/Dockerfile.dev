@@ -1,0 +1,7 @@
+# Local development only. Watches .java files and rebuilds/restarts on change.
+FROM eclipse-temurin:25.0.4_7-jdk-alpine
+RUN wget -qO- https://github.com/watchexec/watchexec/releases/download/v2.7.3/watchexec-2.7.3-x86_64-unknown-linux-musl.tar.xz | tar -xJ -C /tmp \
+    && mv /tmp/watchexec-*/watchexec /usr/local/bin/watchexec \
+    && rm -rf /tmp/watchexec-*
+WORKDIR /app
+ENTRYPOINT ["watchexec", "--restart", "--poll", "2s", "-e", "java,proto,gradle", "--", "./gradlew", "run", "--no-daemon"]
