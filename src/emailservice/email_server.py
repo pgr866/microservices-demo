@@ -41,8 +41,7 @@ class BaseEmailService(demo_pb2_grpc.EmailServiceServicer):
       status=health_pb2.HealthCheckResponse.SERVING)
   
   def Watch(self, request, context):
-    return health_pb2.HealthCheckResponse(
-      status=health_pb2.HealthCheckResponse.UNIMPLEMENTED)
+    context.abort(grpc.StatusCode.UNIMPLEMENTED, 'Watch is not implemented')
 
 class DummyEmailService(BaseEmailService):
   def SendOrderConfirmation(self, request, context):
@@ -68,5 +67,5 @@ def start():
 
 
 if __name__ == '__main__':
-  logger.info('starting the email service in dummy mode.')
+  logger.info(f'starting the email service in dummy mode.')
   start()

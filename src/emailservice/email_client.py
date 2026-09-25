@@ -33,7 +33,7 @@ def send_confirmation_email(email, order):
     logger.info('Request sent.')
   except grpc.RpcError as err:
     logger.error(err.details())
-    logger.error('{}, {}'.format(err.code().name, err.code().value))
+    logger.error(f'{err.code().name}, {err.code().value}')
 
 if __name__ == '__main__':
   logger.info('Client for email service.')
