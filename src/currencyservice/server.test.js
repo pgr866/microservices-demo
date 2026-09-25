@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-const { _carry, convert } = require('./server');
+const { _carry, convert, getSupportedCurrencies, check } = require('./server');
 
 describe('_carry', () => {
   it('leaves a whole amount untouched', () => {
@@ -59,5 +59,25 @@ describe('convert', () => {
       nanos: 0,
       currency_code: 'EUR',
     });
+  });
+});
+
+describe('getSupportedCurrencies', () => {
+  it('lists the currency codes from the conversion table', () => {
+    const callback = jest.fn();
+    getSupportedCurrencies({}, callback);
+
+    expect(callback).toHaveBeenCalledTimes(1);
+    const [err, result] = callback.mock.calls[0];
+    expect(err).toBeNull();
+    expect(result.currency_codes).toEqual(expect.arrayContaining(['EUR', 'USD']));
+  });
+});
+
+describe('check', () => {
+  it('reports SERVING', () => {
+    const callback = jest.fn();
+    check({}, callback);
+    expect(callback).toHaveBeenCalledWith(null, { status: 'SERVING' });
   });
 });

@@ -19,7 +19,7 @@ const logger = pino({
   name: 'currencyservice-server',
   messageKey: 'message',
   formatters: {
-    level (logLevelString, logLevelNum) {
+    level (logLevelString) {
       return { severity: logLevelString }
     }
   }
@@ -78,7 +78,7 @@ function _carry (amount) {
  * Lists the supported currencies
  */
 function getSupportedCurrencies (call, callback) {
-  logger.info('Getting supported currencies...');
+  logger.info('Getting supported currencies..\.');
   _getCurrencyData((data) => {
     callback(null, {currency_codes: Object.keys(data)});
   });
@@ -142,12 +142,11 @@ function main () {
     grpc.ServerCredentials.createInsecure(),
     function() {
       logger.info(`CurrencyService gRPC server started on port ${PORT}`);
-      server.start();
     },
    );
 }
 
-module.exports = { _carry, convert };
+module.exports = { _carry, convert, getSupportedCurrencies, check };
 
 if (require.main === module) {
   main();
