@@ -96,3 +96,20 @@ def test_logger_defaults_severity_and_timestamp():
 
 def test_logger_uppercases_explicit_severity():
   assert format_record(severity='error')['severity'] == 'ERROR'
+
+
+def test_renders_shipping_cost():
+  html = template.render(order=build_order([]))
+  assert '5.99 USD' in html
+
+
+def test_pads_cents_to_two_digits():
+  order = build_order([make_item('OLJCESPC7Z', 1, 3, 50000000)])
+  assert '3.05 USD' in template.render(order=order)
+
+
+def test_escapes_html_in_order_fields():
+  order = build_order([make_item('<script>alert(1)</script>', 1, 1, 0)])
+  html = template.render(order=order)
+  assert '<script>' not in html
+  assert '&lt;script&gt;' in html
