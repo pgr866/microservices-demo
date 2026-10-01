@@ -10,6 +10,7 @@ services:
       - "3550:3550"
     environment:
       PORT: "3550"
+      LOG_LEVEL: "debug"
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "3550"]
       interval: 5s
@@ -27,6 +28,7 @@ services:
       - "50051:50051"
     environment:
       PORT: "50051"
+      LOG_LEVEL: "debug"
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "50051"]
       interval: 5s
@@ -45,6 +47,7 @@ services:
       - "50052:50052"
     environment:
       PORT: "50052"
+      LOG_LEVEL: "debug"
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "50052"]
       interval: 5s
@@ -63,6 +66,7 @@ services:
       - "7000:7000"
     environment:
       PORT: "7000"
+      LOG_LEVEL: "debug"
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "7000"]
       interval: 5s
@@ -80,6 +84,7 @@ services:
       - "8080:8080"
     environment:
       PORT: "8080"
+      LOG_LEVEL: "debug"
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "8080"]
       interval: 5s
@@ -98,6 +103,7 @@ services:
       - "9555:9555"
     environment:
       PORT: "9555"
+      LOG_LEVEL: "debug"
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "9555"]
       interval: 5s
@@ -133,6 +139,7 @@ services:
       - "7070:7070"
     environment:
       ASPNETCORE_HTTP_PORTS: "7070"
+      LOG_LEVEL: "debug"
       REDIS_ADDR: "redis-cart:6379"
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "7070"]
@@ -154,6 +161,7 @@ services:
       - "8081:8081"
     environment:
       PORT: "8081"
+      LOG_LEVEL: "debug"
       PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "8081"]
@@ -175,6 +183,7 @@ services:
       - "5050:5050"
     environment:
       PORT: "5050"
+      LOG_LEVEL: "debug"
       SHIPPING_SERVICE_ADDR: "shippingservice:50051"
       PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
       CART_SERVICE_ADDR: "cartservice:7070"
@@ -211,6 +220,7 @@ services:
       - "8082:8082"
     environment:
       PORT: "8082"
+      LOG_LEVEL: "debug"
       PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
       CURRENCY_SERVICE_ADDR: "currencyservice:7000"
       CART_SERVICE_ADDR: "cartservice:7070"

@@ -31,11 +31,13 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.core.config.Configurator;
 
 public final class AdService {
 
@@ -106,7 +108,7 @@ public final class AdService {
       AdService service = AdService.getInstance();
       try {
         List<Ad> allAds = new ArrayList<>();
-        logger.info("received ad request (context_words=" + req.getContextKeysList() + ")");
+        logger.debug("received ad request (context_words=" + req.getContextKeysList() + ")");
         if (req.getContextKeysCount() > 0) {
           for (int i = 0; i < req.getContextKeysCount(); i++) {
             Collection<Ad> ads = service.getAdsByCategory(req.getContextKeys(i));
@@ -200,7 +202,26 @@ public final class AdService {
         .build();
   }
 
+  /** LOG_LEVEL, with the same values as the other services: info if unset or empty. */
+  static Level logLevel(String value) {
+    if (value == null || value.isEmpty()) {
+      return Level.INFO;
+    }
+    Level level = Level.getLevel(value.toUpperCase(Locale.ROOT));
+    if (level == null) {
+      throw new IllegalArgumentException(
+          "invalid LOG_LEVEL \"" + value + "\": want debug, info, warn or error");
+    }
+    return level;
+  }
+
   public static void main(String[] args) throws IOException, InterruptedException {
+    try {
+      Configurator.setRootLevel(logLevel(System.getenv("LOG_LEVEL")));
+    } catch (IllegalArgumentException e) {
+      logger.fatal(e.getMessage());
+      System.exit(1);
+    }
     logger.info("AdService starting.");
     final AdService service = AdService.getInstance();
     service.start();

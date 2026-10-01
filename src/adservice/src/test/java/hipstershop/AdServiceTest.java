@@ -1,6 +1,7 @@
 package hipstershop;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hipstershop.Demo.Ad;
@@ -10,6 +11,7 @@ import io.grpc.stub.StreamObserver;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.Test;
 
 class AdServiceTest {
@@ -121,5 +123,15 @@ class AdServiceTest {
 
     // 7 ads exist in total; 50 random draws of 2 should have surfaced more than just one.
     assertTrue(seenUrls.size() > 1);
+  }
+
+  @Test
+  void logLevelAcceptsTheSameValuesAsTheOtherServices() {
+    assertEquals(Level.INFO, AdService.logLevel(null));
+    assertEquals(Level.INFO, AdService.logLevel(""));
+    assertEquals(Level.DEBUG, AdService.logLevel("debug"));
+    assertEquals(Level.WARN, AdService.logLevel("warn"));
+    assertEquals(Level.ERROR, AdService.logLevel("ERROR"));
+    assertThrows(IllegalArgumentException.class, () -> AdService.logLevel("verbose"));
   }
 }

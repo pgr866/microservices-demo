@@ -17,6 +17,7 @@
 const pino = require('pino');
 const logger = pino({
   name: 'currencyservice-server',
+  level: (process.env.LOG_LEVEL || 'info').toLowerCase(),
   messageKey: 'message',
   formatters: {
     level(logLevelString) {
@@ -68,7 +69,7 @@ function _carry(amount) {
 }
 
 function getSupportedCurrencies(call, callback) {
-  logger.info('Getting supported currencies..\.');
+  logger.debug('Getting supported currencies..\.');
   _getCurrencyData((data) => {
     callback(null, { currency_codes: Object.keys(data) });
   });
@@ -112,7 +113,7 @@ function convert(call, callback) {
       result.nanos = Math.floor(result.nanos);
       result.currency_code = request.to_code;
 
-      logger.info(`conversion request successful`);
+      logger.debug(`conversion request successful`);
       callback(null, result);
     });
   } catch (err) {

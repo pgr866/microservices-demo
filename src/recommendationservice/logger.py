@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import logging
+import os
 import sys
 
 from pythonjsonlogger import json as jsonlogger
@@ -37,6 +38,6 @@ def getJSONLogger(name):
     formatter = CustomJsonFormatter("%(timestamp)s %(severity)s %(name)s %(message)s")
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+    logger.setLevel((os.environ.get("LOG_LEVEL") or "info").upper())
     logger.propagate = False
     return logger

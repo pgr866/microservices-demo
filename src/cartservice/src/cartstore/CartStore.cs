@@ -39,7 +39,7 @@ namespace cartservice.cartstore
 
         public Task AddItemAsync(string userId, string productId, int quantity)
         {
-            _logger.LogInformation("AddItem product_id={ProductId} quantity={Quantity}", productId, quantity);
+            _logger.LogDebug("AddItem product_id={ProductId} quantity={Quantity}", productId, quantity);
             // One atomic step in the storage, so concurrent additions to the same
             // cart all count.
             return Guard(() => _storage.IncrementAsync(Key(userId), productId, quantity, CartLifetime));
@@ -47,13 +47,13 @@ namespace cartservice.cartstore
 
         public Task EmptyCartAsync(string userId)
         {
-            _logger.LogInformation("EmptyCart");
+            _logger.LogDebug("EmptyCart");
             return Guard(() => _storage.DeleteAsync(Key(userId)));
         }
 
         public async Task<Hipstershop.Cart> GetCartAsync(string userId)
         {
-            _logger.LogInformation("GetCart");
+            _logger.LogDebug("GetCart");
             var items = await Guard(() => _storage.GetAllAsync(Key(userId)));
 
             // We decided to return empty cart in cases when user wasn't in the cache before

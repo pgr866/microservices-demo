@@ -59,7 +59,7 @@ class RecommendationService(demo_pb2_grpc.RecommendationServiceServicer):
         prod_list = random.sample(
             filtered_products, min(max_responses, len(filtered_products))
         )
-        logger.info(f"[Recv ListRecommendations] product_ids={prod_list}")
+        logger.debug(f"[Recv ListRecommendations] product_ids={prod_list}")
         return demo_pb2.ListRecommendationsResponse(product_ids=prod_list)
 
     def Check(self, request, context):

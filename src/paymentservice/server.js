@@ -76,7 +76,7 @@ class HipsterShopServer {
     try {
       // Not the request itself: it carries the full card number and CVV, which
       // must never be stored, logs included (PCI DSS).
-      logger.info('PaymentService#Charge invoked');
+      logger.debug('PaymentService#Charge invoked');
       const response = charge(call.request);
       callback(null, response);
     } catch (err) {

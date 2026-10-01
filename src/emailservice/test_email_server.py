@@ -4,12 +4,13 @@ import signal
 from unittest import mock
 
 import grpc
+import pytest
 from grpc_health.v1 import health_pb2
 
 import demo_pb2
 import email_server
 from email_server import DummyEmailService, template
-from logger import CustomJsonFormatter
+from logger import CustomJsonFormatter, getJSONLogger
 
 
 def make_item(product_id, quantity, units, nanos):
@@ -106,6 +107,18 @@ def test_logger_uppercases_explicit_severity():
     assert format_record(severity="error")["severity"] == "ERROR"
 
 
+def test_logger_level_comes_from_log_level(monkeypatch):
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    assert getJSONLogger("test-default").level == logging.INFO
+    monkeypatch.setenv("LOG_LEVEL", "")
+    assert getJSONLogger("test-empty").level == logging.INFO
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    assert getJSONLogger("test-debug").level == logging.DEBUG
+    monkeypatch.setenv("LOG_LEVEL", "verbose")
+    with pytest.raises(ValueError):
+        getJSONLogger("test-invalid")
+
+
 def test_renders_shipping_cost():
     html = template.render(order=build_order([]))
     assert "5.99 USD" in html
@@ -145,7 +158,7 @@ def test_stop_on_signals_stops_the_server_gracefully():
 def test_send_order_confirmation_does_not_log_the_email_address(monkeypatch):
     logged = []
     monkeypatch.setattr(
-        email_server.logger, "info", lambda msg, *a, **k: logged.append(msg)
+        email_server.logger, "debug", lambda msg, *a, **k: logged.append(msg)
     )
     request = demo_pb2.SendOrderConfirmationRequest(
         email="someone@example.com", order=demo_pb2.OrderResult(order_id="order-1")

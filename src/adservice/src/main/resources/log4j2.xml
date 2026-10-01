@@ -33,7 +33,7 @@
     <Logger name="io.grpc.netty" level="INFO"/>
     <Logger name="io.netty" level="INFO"/>
     <Logger name="sun.net" level="INFO"/>
-    <Root level="TRACE">
+    <Root level="INFO">
       <AppenderRef ref="STDOUT"/>
     </Root>
   </Loggers>

@@ -19,6 +19,7 @@ const pino = require('pino');
 
 const logger = pino({
   name: 'paymentservice-charge',
+  level: (process.env.LOG_LEVEL || 'info').toLowerCase(),
   messageKey: 'message',
   formatters: {
     level(logLevelString) {

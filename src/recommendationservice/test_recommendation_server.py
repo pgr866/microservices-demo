@@ -9,7 +9,7 @@ from grpc_health.v1 import health_pb2
 
 import demo_pb2
 import recommendation_server
-from logger import CustomJsonFormatter
+from logger import CustomJsonFormatter, getJSONLogger
 from recommendation_server import RecommendationService
 
 
@@ -137,6 +137,18 @@ def test_logger_defaults_severity_and_timestamp():
 
 def test_logger_uppercases_explicit_severity():
     assert format_record(severity="error")["severity"] == "ERROR"
+
+
+def test_logger_level_comes_from_log_level(monkeypatch):
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    assert getJSONLogger("test-default").level == logging.INFO
+    monkeypatch.setenv("LOG_LEVEL", "")
+    assert getJSONLogger("test-empty").level == logging.INFO
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    assert getJSONLogger("test-debug").level == logging.DEBUG
+    monkeypatch.setenv("LOG_LEVEL", "verbose")
+    with pytest.raises(ValueError):
+        getJSONLogger("test-invalid")
 
 
 def test_stop_on_signals_stops_the_server_gracefully():

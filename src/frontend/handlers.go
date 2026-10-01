@@ -56,7 +56,7 @@ var validEnvs = []string{"local", "gcp", "azure", "aws", "onprem", "alibaba"}
 
 func (fe *frontendServer) homeHandler(w http.ResponseWriter, r *http.Request) {
 	log := r.Context().Value(ctxKeyLog{}).(logrus.FieldLogger)
-	log.WithField("currency", currentCurrency(r)).Info("home")
+	log.WithField("currency", currentCurrency(r)).Debug("home")
 	currencies, err := fe.getCurrencies(r.Context())
 	if err != nil {
 		renderHTTPError(log, r, w, fmt.Errorf("could not retrieve currencies: %w", err), http.StatusInternalServerError)
@@ -358,7 +358,7 @@ func (fe *frontendServer) placeOrderHandler(w http.ResponseWriter, r *http.Reque
 		renderHTTPError(log, r, w, fmt.Errorf("failed to complete the order: %w", err), http.StatusInternalServerError)
 		return
 	}
-	log.WithField("order", order.GetOrder().GetOrderId()).Info("order placed")
+	log.WithField("order", order.GetOrder().GetOrderId()).Debug("order placed")
 
 	recommendations, _ := fe.getRecommendations(r.Context(), sessionID(r), nil)
 

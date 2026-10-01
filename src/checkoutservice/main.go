@@ -15,6 +15,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -50,6 +51,11 @@ func init() {
 		TimestampFormat: time.RFC3339Nano,
 	}
 	log.Out = os.Stdout
+	level, err := logrus.ParseLevel(cmp.Or(os.Getenv("LOG_LEVEL"), "info"))
+	if err != nil {
+		log.Fatalf("invalid LOG_LEVEL: %v", err)
+	}
+	log.Level = level
 }
 
 type checkoutService struct {
@@ -111,7 +117,7 @@ func mustConnGRPC(envKey string) *grpc.ClientConn {
 
 func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (*pb.PlaceOrderResponse, error) {
 	// No user ID: it is the session ID frontend keys the cart with, kept out of the logs.
-	log.Infof("[PlaceOrder] user_currency=%q", req.GetUserCurrency())
+	log.Debugf("[PlaceOrder] user_currency=%q", req.GetUserCurrency())
 
 	if err := validatePlaceOrderRequest(req); err != nil {
 		return nil, err
@@ -131,6 +137,8 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 	if err != nil {
 		return nil, err
 	}
+	// Info, unlike the rest of the order: if shipping fails next, the order
+	// fails but the card stays charged, and this is the record of it.
 	log.Infof("payment went through (transaction_id: %s)", txID)
 
 	shippingTrackingID, err := cs.shipOrder(ctx, req.GetAddress(), prep.cartItems)
@@ -154,7 +162,7 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 	if err := cs.sendOrderConfirmation(ctx, req.GetEmail(), orderResult); err != nil {
 		log.Warnf("failed to send the confirmation of order %s: %v", orderResult.GetOrderId(), err)
 	} else {
-		log.Infof("confirmation of order %s sent", orderResult.GetOrderId())
+		log.Debugf("confirmation of order %s sent", orderResult.GetOrderId())
 	}
 	resp := &pb.PlaceOrderResponse{Order: orderResult}
 	return resp, nil

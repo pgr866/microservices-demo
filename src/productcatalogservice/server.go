@@ -15,6 +15,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"net"
 	"os"
@@ -57,6 +58,11 @@ func init() {
 		TimestampFormat: time.RFC3339Nano,
 	}
 	log.Out = os.Stdout
+	level, err := logrus.ParseLevel(cmp.Or(os.Getenv("LOG_LEVEL"), "info"))
+	if err != nil {
+		log.Fatalf("invalid LOG_LEVEL: %v", err)
+	}
+	log.Level = level
 	catalogMutex = &sync.RWMutex{}
 }
 
@@ -110,6 +116,7 @@ func run(port string) error {
 	if err != nil {
 		log.Fatalf("could not parse product catalog: %v", err)
 	}
+	log.Infof("catalog loaded (%d products)", len(svc.catalog.GetProducts()))
 
 	pb.RegisterProductCatalogServiceServer(srv, svc)
 	healthcheck := health.NewServer()

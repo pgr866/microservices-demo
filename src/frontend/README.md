@@ -38,6 +38,7 @@ docker run --rm --network host curlimages/curl:8.22.0 -s -o /dev/null -w "%{http
 Optional environment variables, besides the `*_SERVICE_ADDR` ones:
 
 - `REQUEST_TIMEOUT`: deadline of every request, passed on to the gRPC calls (Go duration, default `5s`).
+- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`. Per-request logs are `debug`, so the default only shows startup, shutdown, warnings and errors; `compose.yaml` sets `debug` for development.
 - `ENV_PLATFORM`: platform badge shown on the page (`local`, `gcp`, `aws`, `azure`, `onprem` or `alibaba`; default `local`).
 - `BASE_URL`: path prefix to serve the shop under (e.g. `/shop`).
 - `LISTEN_ADDR`: address to listen on (default: all interfaces).

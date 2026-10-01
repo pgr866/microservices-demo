@@ -15,6 +15,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -48,6 +49,11 @@ func init() {
 		TimestampFormat: time.RFC3339Nano,
 	}
 	log.Out = os.Stdout
+	level, err := logrus.ParseLevel(cmp.Or(os.Getenv("LOG_LEVEL"), "info"))
+	if err != nil {
+		log.Fatalf("invalid LOG_LEVEL: %v", err)
+	}
+	log.Level = level
 }
 
 func main() {
@@ -79,8 +85,8 @@ type server struct {
 }
 
 func (s *server) GetQuote(ctx context.Context, in *pb.GetQuoteRequest) (*pb.GetQuoteResponse, error) {
-	log.Info("[GetQuote] received request")
-	defer log.Info("[GetQuote] completed request")
+	log.Debug("[GetQuote] received request")
+	defer log.Debug("[GetQuote] completed request")
 
 	count := 0
 	for _, item := range in.GetItems() {
@@ -104,8 +110,8 @@ func (s *server) GetQuote(ctx context.Context, in *pb.GetQuoteRequest) (*pb.GetQ
 
 // ShipOrder ships nothing: it only returns a made-up tracking ID.
 func (s *server) ShipOrder(ctx context.Context, in *pb.ShipOrderRequest) (*pb.ShipOrderResponse, error) {
-	log.Info("[ShipOrder] received request")
-	defer log.Info("[ShipOrder] completed request")
+	log.Debug("[ShipOrder] received request")
+	defer log.Debug("[ShipOrder] completed request")
 	// Without this check, a request with no address dereferences a nil pointer,
 	// and the panic takes down the whole server, not just this call.
 	if in.GetAddress() == nil {

@@ -29,7 +29,7 @@ func loadCatalog(catalog *pb.ListProductsResponse) error {
 }
 
 func loadCatalogFromLocalFile(catalog *pb.ListProductsResponse) error {
-	log.Info("loading catalog from local products.json file...")
+	log.Debug("loading catalog from local products.json file...")
 
 	catalogJSON, err := os.ReadFile("products.json")
 	if err != nil {
@@ -42,6 +42,6 @@ func loadCatalogFromLocalFile(catalog *pb.ListProductsResponse) error {
 		return err
 	}
 
-	log.Info("successfully parsed product catalog json")
+	log.Debug("successfully parsed product catalog json")
 	return nil
 }

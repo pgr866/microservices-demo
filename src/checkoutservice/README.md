@@ -37,6 +37,10 @@ docker run --rm --network host -v "$(pwd)/protos:/protos" -w /protos fullstoryde
   localhost:5050 hipstershop.CheckoutService/PlaceOrder
 ```
 
+## Configuration
+
+- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`. Per-request logs are `debug`, so the default only shows startup, shutdown, each card charge, warnings and errors; `compose.yaml` sets `debug` for development.
+
 ## Testing
 
 Use `dorny/test-reporter` action (`golang-json`). **Blocking**: the CI fails if any test fails.

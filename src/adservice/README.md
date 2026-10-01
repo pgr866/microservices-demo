@@ -25,6 +25,10 @@ docker run --rm --network host -v "$(pwd)/protos:/protos" -w /protos fullstoryde
   localhost:9555 hipstershop.AdService/GetAds
 ```
 
+## Configuration
+
+- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`. Per-request logs are `debug`, so the default only shows startup, shutdown, warnings and errors; `compose.yaml` sets `debug` for development.
+
 ## Testing
 
 Use `dorny/test-reporter` action (`java-junit`, reading `build/test-results/test/*.xml`). **Blocking**: the CI fails if any test fails.

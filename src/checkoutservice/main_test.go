@@ -10,6 +10,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -397,7 +398,9 @@ func TestMustConnGRPC_missingEnvExits(t *testing.T) {
 func TestPlaceOrder_doesNotLogPersonalData(t *testing.T) {
 	var out bytes.Buffer
 	log.Out = &out
-	t.Cleanup(func() { log.Out = os.Stdout })
+	level := log.Level
+	log.Level = logrus.DebugLevel
+	t.Cleanup(func() { log.Out, log.Level = os.Stdout, level })
 	for _, emailErr := range []error{nil, errors.New("email unavailable")} {
 		svc, f := newTestService()
 		f.email.err = emailErr

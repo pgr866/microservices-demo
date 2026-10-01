@@ -47,7 +47,7 @@ class BaseEmailService(demo_pb2_grpc.EmailServiceServicer):
 class DummyEmailService(BaseEmailService):
     def SendOrderConfirmation(self, request, context):
         # Logged by order ID: the email address is personal data, kept out of the logs.
-        logger.info(
+        logger.debug(
             f"A request to send the confirmation of order {request.order.order_id} has been received."
         )
         return demo_pb2.Empty()

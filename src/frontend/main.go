@@ -15,6 +15,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -73,6 +74,11 @@ func init() {
 		TimestampFormat: time.RFC3339Nano,
 	}
 	log.Out = os.Stdout
+	level, err := logrus.ParseLevel(cmp.Or(os.Getenv("LOG_LEVEL"), "info"))
+	if err != nil {
+		log.Fatalf("invalid LOG_LEVEL: %v", err)
+	}
+	log.Level = level
 }
 
 type ctxKeySessionID struct{}
