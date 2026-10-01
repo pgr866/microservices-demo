@@ -1,3 +1,9 @@
 .gradle/
 build/
 src/test/
+Dockerfile*
+.dockerignore
+README.md
+genproto.sh
+gradlew.bat
+checkstyle.xml

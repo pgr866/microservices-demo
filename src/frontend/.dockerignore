@@ -1,4 +1,9 @@
 tmp/
-*_test.go
 test-report.json
 coverage.out
+coverage.html
+**/*_test.go
+Dockerfile*
+.dockerignore
+README.md
+genproto.sh

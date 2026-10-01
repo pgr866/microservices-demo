@@ -12,10 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Define a default value so it's not empty if the builder fails to provide it
-ARG BUILDPLATFORM=linux/amd64
-
-FROM --platform=$BUILDPLATFORM eclipse-temurin:25.0.4.1_1-jdk-alpine@sha256:3fd2d245c4e0eba615fe366a71b8bd25f5db7104f53e4026b24bf508b880bd2a AS builder
+FROM eclipse-temurin:25.0.4.1_1-jdk-alpine@sha256:3fd2d245c4e0eba615fe366a71b8bd25f5db7104f53e4026b24bf508b880bd2a AS builder
 RUN apk add --no-cache gcompat
 WORKDIR /app
 COPY ["build.gradle", "settings.gradle", "gradlew", "./"]
@@ -24,16 +21,17 @@ COPY src/main/proto src/main/proto
 RUN ./gradlew downloadDependencies generateProto --no-daemon
 COPY . .
 RUN ./gradlew installDist --no-daemon
+# Java runtime with only the modules the jars use, much smaller than the full JRE image.
+RUN jlink --add-modules "$(jdeps --ignore-missing-deps --print-module-deps --multi-release 25 build/install/hipstershop/lib/*.jar)" \
+    --strip-debug --no-man-pages --no-header-files --generate-cds-archive --output /jre
 
-FROM eclipse-temurin:25.0.4.1_1-jre-alpine@sha256:3c0a9084927a221ccd1d007fcaf614465672c0af37aaa834c5184483afe56d61
-# The base image installs fonts (fontconfig, ttf-dejavu, and with them freetype
-# and libpng) for apps that draw text; a headless gRPC service never does, so
-# they are removed along with the vulnerabilities they bring in.
-RUN apk del --no-cache fontconfig ttf-dejavu && \
-    addgroup -g 1000 adservice && \
+FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+RUN addgroup -g 1000 adservice && \
     adduser -D -u 1000 -G adservice adservice
+ENV JAVA_HOME=/opt/java
+COPY --from=builder /jre /opt/java
 WORKDIR /app
-COPY --from=builder --chown=adservice:adservice /app/build/install/hipstershop .
+COPY --from=builder /app/build/install/hipstershop .
 USER adservice
 EXPOSE 9555
 ENTRYPOINT ["/app/bin/AdService"]

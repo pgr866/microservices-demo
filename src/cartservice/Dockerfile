@@ -12,11 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Define a default value so it's not empty if the builder fails to provide it
-ARG BUILDPLATFORM=linux/amd64
-
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24@sha256:3cc3bbbbf93d82104892f42aa9106b6be4d120346dea0649643a97c801525256 AS builder
-ARG TARGETARCH=amd64
+ARG TARGETARCH
 RUN apk add --no-cache gcompat
 WORKDIR /app
 COPY src/cartservice.csproj .
@@ -41,7 +38,7 @@ FROM mcr.microsoft.com/dotnet/runtime-deps:10.0.12-alpine3.24@sha256:f23f2bc63f6
 RUN addgroup -g 1000 cartservice && \
     adduser -D -u 1000 -G cartservice cartservice
 WORKDIR /app
-COPY --from=builder --chown=cartservice:cartservice /cartservice .
+COPY --from=builder /cartservice .
 USER cartservice
 EXPOSE 7070
 ENV DOTNET_EnableDiagnostics=0 \

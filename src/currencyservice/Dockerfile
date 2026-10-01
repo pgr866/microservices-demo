@@ -12,10 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Define a default value so it's not empty if the builder fails to provide it
-ARG BUILDPLATFORM=linux/amd64
-
-FROM --platform=$BUILDPLATFORM node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS builder
+FROM node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
@@ -24,10 +21,10 @@ FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4c
 RUN apk add --no-cache libstdc++ && \
     addgroup -g 1000 nodejs && \
     adduser -D -u 1000 -G nodejs nodejs
-COPY --from=builder --chown=nodejs:nodejs /usr/local/bin/node /usr/local/bin/node
+COPY --from=builder /usr/local/bin/node /usr/local/bin/node
 WORKDIR /app
-COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
-COPY --chown=nodejs:nodejs . .
+COPY --from=builder /app/node_modules ./node_modules
+COPY . .
 USER nodejs
 EXPOSE 7000
 ENTRYPOINT ["node", "server.js"]

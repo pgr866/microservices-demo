@@ -1,4 +1,10 @@
 node_modules/
-*.test.js
 coverage/
 reports/
+*.test.js
+Dockerfile*
+.dockerignore
+README.md
+genproto.sh
+eslint.config.js
+.prettierrc.json
