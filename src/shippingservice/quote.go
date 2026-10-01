@@ -32,7 +32,7 @@ func (q Quote) String() string {
 
 // CreateQuoteFromCount takes a number of items and returns a shipping quote.
 func CreateQuoteFromCount(count int) Quote {
-	if count == 0 {
+	if (count == 0) == true {
 		return CreateQuoteFromFloat(0)
 	}
 	return CreateQuoteFromFloat(8.99)

@@ -16,14 +16,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"time"
+	"uuid"
 
-	"cloud.google.com/go/profiler"
-	"github.com/google/uuid"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -34,24 +33,14 @@ import (
 	pb "github.com/GoogleCloudPlatform/microservices-demo/src/checkoutservice/genproto"
 	money "github.com/GoogleCloudPlatform/microservices-demo/src/checkoutservice/money"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
-
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	"go.opentelemetry.io/otel/propagation"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-const (
-	listenPort  = "5050"
-	usdCurrency = "USD"
-)
+const listenPort = "5050"
 
 var log *logrus.Logger
 
 func init() {
 	log = logrus.New()
-	log.Level = logrus.DebugLevel
 	log.Formatter = &logrus.JSONFormatter{
 		FieldMap: logrus.FieldMap{
 			logrus.FieldKeyTime:  "timestamp",
@@ -66,217 +55,168 @@ func init() {
 type checkoutService struct {
 	pb.UnimplementedCheckoutServiceServer
 
-	productCatalogSvcAddr string
-	productCatalogSvcConn *grpc.ClientConn
-
-	cartSvcAddr string
-	cartSvcConn *grpc.ClientConn
-
-	currencySvcAddr string
-	currencySvcConn *grpc.ClientConn
-
-	shippingSvcAddr string
-	shippingSvcConn *grpc.ClientConn
-
-	emailSvcAddr string
-	emailSvcConn *grpc.ClientConn
-
-	paymentSvcAddr string
-	paymentSvcConn *grpc.ClientConn
+	productCatalogSvc pb.ProductCatalogServiceClient
+	cartSvc           pb.CartServiceClient
+	currencySvc       pb.CurrencyServiceClient
+	shippingSvc       pb.ShippingServiceClient
+	emailSvc          pb.EmailServiceClient
+	paymentSvc        pb.PaymentServiceClient
 }
 
 func main() {
-	ctx := context.Background()
-	if os.Getenv("ENABLE_TRACING") == "1" {
-		log.Info("Tracing enabled.")
-		initTracing()
-
-	} else {
-		log.Info("Tracing disabled.")
-	}
-
-	if os.Getenv("ENABLE_PROFILER") == "1" {
-		log.Info("Profiling enabled.")
-		go initProfiling("checkoutservice", "1.0.0")
-	} else {
-		log.Info("Profiling disabled.")
-	}
-
 	port := listenPort
 	if os.Getenv("PORT") != "" {
 		port = os.Getenv("PORT")
 	}
 
-	svc := new(checkoutService)
-	mustMapEnv(&svc.shippingSvcAddr, "SHIPPING_SERVICE_ADDR")
-	mustMapEnv(&svc.productCatalogSvcAddr, "PRODUCT_CATALOG_SERVICE_ADDR")
-	mustMapEnv(&svc.cartSvcAddr, "CART_SERVICE_ADDR")
-	mustMapEnv(&svc.currencySvcAddr, "CURRENCY_SERVICE_ADDR")
-	mustMapEnv(&svc.emailSvcAddr, "EMAIL_SERVICE_ADDR")
-	mustMapEnv(&svc.paymentSvcAddr, "PAYMENT_SERVICE_ADDR")
-
-	mustConnGRPC(ctx, &svc.shippingSvcConn, svc.shippingSvcAddr)
-	mustConnGRPC(ctx, &svc.productCatalogSvcConn, svc.productCatalogSvcAddr)
-	mustConnGRPC(ctx, &svc.cartSvcConn, svc.cartSvcAddr)
-	mustConnGRPC(ctx, &svc.currencySvcConn, svc.currencySvcAddr)
-	mustConnGRPC(ctx, &svc.emailSvcConn, svc.emailSvcAddr)
-	mustConnGRPC(ctx, &svc.paymentSvcConn, svc.paymentSvcAddr)
-
-	log.Infof("service config: %+v", svc)
+	svc := &checkoutService{
+		shippingSvc:       pb.NewShippingServiceClient(mustConnGRPC("SHIPPING_SERVICE_ADDR")),
+		productCatalogSvc: pb.NewProductCatalogServiceClient(mustConnGRPC("PRODUCT_CATALOG_SERVICE_ADDR")),
+		cartSvc:           pb.NewCartServiceClient(mustConnGRPC("CART_SERVICE_ADDR")),
+		currencySvc:       pb.NewCurrencyServiceClient(mustConnGRPC("CURRENCY_SERVICE_ADDR")),
+		emailSvc:          pb.NewEmailServiceClient(mustConnGRPC("EMAIL_SERVICE_ADDR")),
+		paymentSvc:        pb.NewPaymentServiceClient(mustConnGRPC("PAYMENT_SERVICE_ADDR")),
+	}
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	var srv *grpc.Server
-
-	// Propagate trace context always
-	otel.SetTextMapPropagator(
-		propagation.NewCompositeTextMapPropagator(
-			propagation.TraceContext{}, propagation.Baggage{}))
-	srv = grpc.NewServer(
-		grpc.StatsHandler(otelgrpc.NewServerHandler()),
-	)
+	srv := grpc.NewServer()
 
 	pb.RegisterCheckoutServiceServer(srv, svc)
 	healthcheck := health.NewServer()
 	healthpb.RegisterHealthServer(srv, healthcheck)
 	log.Infof("starting to listen on tcp: %q", lis.Addr().String())
-	err = srv.Serve(lis)
-	log.Fatal(err)
+	if err := serveUntilSignal(srv, lis, healthcheck); err != nil {
+		log.Fatal(err)
+	}
 }
 
-func initStats() {
-	//TODO(arbrown) Implement OpenTelemetry stats
-}
-
-func initTracing() {
-	var (
-		collectorAddr string
-		collectorConn *grpc.ClientConn
-	)
-
-	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, time.Second*3)
-	defer cancel()
-
-	mustMapEnv(&collectorAddr, "COLLECTOR_SERVICE_ADDR")
-	mustConnGRPC(ctx, &collectorConn, collectorAddr)
-
-	exporter, err := otlptracegrpc.New(
-		ctx,
-		otlptracegrpc.WithGRPCConn(collectorConn))
+// mustConnGRPC creates a client connection to the address set in envKey. The
+// connection is lazy: nothing is dialed until the first RPC.
+func mustConnGRPC(envKey string) *grpc.ClientConn {
+	addr := os.Getenv(envKey)
+	if addr == "" {
+		log.Fatalf("environment variable %q not set", envKey)
+	}
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Warnf("warn: Failed to create trace exporter: %v", err)
+		log.Fatalf("grpc: failed to connect %s: %v", addr, err)
 	}
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()))
-	otel.SetTracerProvider(tp)
-
-}
-
-func initProfiling(service, version string) {
-	// TODO(ahmetb) this method is duplicated in other microservices using Go
-	// since they are not sharing packages.
-	for i := 1; i <= 3; i++ {
-		if err := profiler.Start(profiler.Config{
-			Service:        service,
-			ServiceVersion: version,
-			// ProjectID must be set if not running on GCP.
-			// ProjectID: "my-project",
-		}); err != nil {
-			log.Warnf("failed to start profiler: %+v", err)
-		} else {
-			log.Info("started Stackdriver profiler")
-			return
-		}
-		d := time.Second * 10 * time.Duration(i)
-		log.Infof("sleeping %v to retry initializing Stackdriver profiler", d)
-		time.Sleep(d)
-	}
-	log.Warn("could not initialize Stackdriver profiler after retrying, giving up")
-}
-
-func mustMapEnv(target *string, envKey string) {
-	v := os.Getenv(envKey)
-	if v == "" {
-		panic(fmt.Sprintf("environment variable %q not set", envKey))
-	}
-	*target = v
-}
-
-func mustConnGRPC(ctx context.Context, conn **grpc.ClientConn, addr string) {
-	var err error
-	_, cancel := context.WithTimeout(ctx, time.Second*3)
-	defer cancel()
-	*conn, err = grpc.NewClient(addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
-	if err != nil {
-		panic(errors.Wrapf(err, "grpc: failed to connect %s", addr))
-	}
-}
-
-func (cs *checkoutService) Check(ctx context.Context, req *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
-	return &healthpb.HealthCheckResponse{Status: healthpb.HealthCheckResponse_SERVING}, nil
-}
-
-func (cs *checkoutService) Watch(req *healthpb.HealthCheckRequest, ws healthpb.Health_WatchServer) error {
-	return status.Errorf(codes.Unimplemented, "health check via Watch not implemented")
+	log.Infof("%s: %s", envKey, addr)
+	return conn
 }
 
 func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (*pb.PlaceOrderResponse, error) {
-	log.Infof("[PlaceOrder] user_id=%q user_currency=%q", req.UserId, req.UserCurrency)
+	// No user ID: it is the session ID frontend keys the cart with, kept out of the logs.
+	log.Infof("[PlaceOrder] user_currency=%q", req.GetUserCurrency())
 
-	orderID, err := uuid.NewUUID()
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to generate order uuid")
+	if err := validatePlaceOrderRequest(req); err != nil {
+		return nil, err
 	}
 
-	prep, err := cs.prepareOrderItemsAndShippingQuoteFromCart(ctx, req.UserId, req.UserCurrency, req.Address)
+	prep, err := cs.prepareOrderItemsAndShippingQuoteFromCart(ctx, req.GetUserId(), req.GetUserCurrency(), req.GetAddress())
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
+		return nil, err
 	}
 
-	total := pb.Money{CurrencyCode: req.UserCurrency,
-		Units: 0,
-		Nanos: 0}
-	total = money.Must(money.Sum(total, *prep.shippingCostLocalized))
-	for _, it := range prep.orderItems {
-		multPrice := money.MultiplySlow(*it.Cost, uint32(it.GetItem().GetQuantity()))
-		total = money.Must(money.Sum(total, multPrice))
+	total, err := orderTotal(req.GetUserCurrency(), prep)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to calculate order total: %v", err)
 	}
 
-	txID, err := cs.chargeCard(ctx, &total, req.CreditCard)
+	txID, err := cs.chargeCard(ctx, total, req.GetCreditCard())
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to charge card: %+v", err)
+		return nil, err
 	}
 	log.Infof("payment went through (transaction_id: %s)", txID)
 
-	shippingTrackingID, err := cs.shipOrder(ctx, req.Address, prep.cartItems)
+	shippingTrackingID, err := cs.shipOrder(ctx, req.GetAddress(), prep.cartItems)
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "shipping error: %+v", err)
+		return nil, err
 	}
 
-	_ = cs.emptyUserCart(ctx, req.UserId)
+	if err := cs.emptyUserCart(ctx, req.GetUserId()); err != nil {
+		log.Warnf("%v", err)
+	}
 
 	orderResult := &pb.OrderResult{
-		OrderId:            orderID.String(),
+		OrderId:            fmt.Sprintf("%s", uuid.New().String()),
 		ShippingTrackingId: shippingTrackingID,
 		ShippingCost:       prep.shippingCostLocalized,
-		ShippingAddress:    req.Address,
+		ShippingAddress:    req.GetAddress(),
 		Items:              prep.orderItems,
 	}
 
-	if err := cs.sendOrderConfirmation(ctx, req.Email, orderResult); err != nil {
-		log.Warnf("failed to send order confirmation to %q: %+v", req.Email, err)
+	// Logged by order ID: the email address is personal data, kept out of the logs.
+	if err := cs.sendOrderConfirmation(ctx, req.GetEmail(), orderResult); err != nil {
+		log.Warnf("failed to send the confirmation of order %s: %v", orderResult.GetOrderId(), err)
 	} else {
-		log.Infof("order confirmation email sent to %q", req.Email)
+		log.Infof("confirmation of order %s sent", orderResult.GetOrderId())
 	}
 	resp := &pb.PlaceOrderResponse{Order: orderResult}
 	return resp, nil
+}
+
+// validatePlaceOrderRequest rejects a request missing a field the order can't
+// be placed without, before calling any other service. The email is optional:
+// the confirmation is best effort.
+func validatePlaceOrderRequest(req *pb.PlaceOrderRequest) error {
+	switch {
+	case req.GetUserId() == "":
+		return status.Error(codes.InvalidArgument, "user_id is required")
+	case req.GetUserCurrency() == "":
+		return status.Error(codes.InvalidArgument, "user_currency is required")
+	case req.GetAddress() == nil:
+		return status.Error(codes.InvalidArgument, "address is required")
+	case req.GetCreditCard() == nil:
+		return status.Error(codes.InvalidArgument, "credit_card is required")
+	}
+	return nil
+}
+
+// dependencyError turns the error of a call to another service into the status
+// PlaceOrder returns. The dependency's own code is not passed through as is: a
+// NotFound from the catalog, for example, would look as if the order itself did
+// not exist. Only a failure worth retrying stays Unavailable; any other one is
+// Internal. Callers handle beforehand the codes they can map to something more
+// specific (e.g. an invalid card).
+func dependencyError(ctx context.Context, err error, msg string) error {
+	code := codes.Internal
+	switch {
+	case errors.Is(ctx.Err(), context.Canceled):
+		code = codes.Canceled
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		code = codes.DeadlineExceeded
+	default:
+		switch status.Code(err) {
+		case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+			code = codes.Unavailable
+		}
+	}
+	return status.Errorf(code, "%s: %v", msg, err)
+}
+
+// orderTotal adds the shipping cost and every item's cost times its quantity.
+// Fails if the currency service returned an invalid amount or one in another
+// currency, instead of charging a wrong total.
+func orderTotal(currency string, prep orderPrep) (*pb.Money, error) {
+	total, err := money.Sum(&pb.Money{CurrencyCode: currency}, prep.shippingCostLocalized)
+	if err != nil {
+		return nil, err
+	}
+	for _, it := range prep.orderItems {
+		itemTotal, err := money.MultiplySlow(it.GetCost(), uint32(it.GetItem().GetQuantity()))
+		if err != nil {
+			return nil, err
+		}
+		if total, err = money.Sum(total, itemTotal); err != nil {
+			return nil, err
+		}
+	}
+	return total, nil
 }
 
 type orderPrep struct {
@@ -289,19 +229,24 @@ func (cs *checkoutService) prepareOrderItemsAndShippingQuoteFromCart(ctx context
 	var out orderPrep
 	cartItems, err := cs.getUserCart(ctx, userID)
 	if err != nil {
-		return out, fmt.Errorf("cart failure: %+v", err)
+		return out, err
+	}
+	// Otherwise the order would charge only the shipping cost and confirm by
+	// email an order with nothing in it.
+	if len(cartItems) == 0 {
+		return out, status.Error(codes.FailedPrecondition, "cart is empty")
 	}
 	orderItems, err := cs.prepOrderItems(ctx, cartItems, userCurrency)
 	if err != nil {
-		return out, fmt.Errorf("failed to prepare order: %+v", err)
+		return out, err
 	}
 	shippingUSD, err := cs.quoteShipping(ctx, address, cartItems)
 	if err != nil {
-		return out, fmt.Errorf("shipping quote failure: %+v", err)
+		return out, err
 	}
 	shippingPrice, err := cs.convertCurrency(ctx, shippingUSD, userCurrency)
 	if err != nil {
-		return out, fmt.Errorf("failed to convert shipping cost to currency: %+v", err)
+		return out, err
 	}
 
 	out.shippingCostLocalized = shippingPrice
@@ -311,43 +256,49 @@ func (cs *checkoutService) prepareOrderItemsAndShippingQuoteFromCart(ctx context
 }
 
 func (cs *checkoutService) quoteShipping(ctx context.Context, address *pb.Address, items []*pb.CartItem) (*pb.Money, error) {
-	shippingQuote, err := pb.NewShippingServiceClient(cs.shippingSvcConn).
-		GetQuote(ctx, &pb.GetQuoteRequest{
-			Address: address,
-			Items:   items})
+	shippingQuote, err := cs.shippingSvc.GetQuote(ctx, &pb.GetQuoteRequest{
+		Address: address,
+		Items:   items})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get shipping quote: %+v", err)
+		return nil, dependencyError(ctx, err, "failed to get shipping quote")
 	}
 	return shippingQuote.GetCostUsd(), nil
 }
 
 func (cs *checkoutService) getUserCart(ctx context.Context, userID string) ([]*pb.CartItem, error) {
-	cart, err := pb.NewCartServiceClient(cs.cartSvcConn).GetCart(ctx, &pb.GetCartRequest{UserId: userID})
+	cart, err := cs.cartSvc.GetCart(ctx, &pb.GetCartRequest{UserId: userID})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user cart during checkout: %+v", err)
+		return nil, dependencyError(ctx, err, "failed to get user cart")
 	}
 	return cart.GetItems(), nil
 }
 
 func (cs *checkoutService) emptyUserCart(ctx context.Context, userID string) error {
-	if _, err := pb.NewCartServiceClient(cs.cartSvcConn).EmptyCart(ctx, &pb.EmptyCartRequest{UserId: userID}); err != nil {
-		return fmt.Errorf("failed to empty user cart during checkout: %+v", err)
+	if _, err := cs.cartSvc.EmptyCart(ctx, &pb.EmptyCartRequest{UserId: userID}); err != nil {
+		return fmt.Errorf("failed to empty user cart during checkout: %w", err)
 	}
 	return nil
 }
 
 func (cs *checkoutService) prepOrderItems(ctx context.Context, items []*pb.CartItem, userCurrency string) ([]*pb.OrderItem, error) {
 	out := make([]*pb.OrderItem, len(items))
-	cl := pb.NewProductCatalogServiceClient(cs.productCatalogSvcConn)
 
 	for i, item := range items {
-		product, err := cl.GetProduct(ctx, &pb.GetProductRequest{Id: item.GetProductId()})
+		// MultiplySlow takes the quantity as uint32: a negative one would loop
+		// billions of times, and 0 would still charge one unit.
+		if item.GetQuantity() < 1 {
+			return nil, status.Errorf(codes.FailedPrecondition, "cart has an invalid quantity %d for product %q", item.GetQuantity(), item.GetProductId())
+		}
+		product, err := cs.productCatalogSvc.GetProduct(ctx, &pb.GetProductRequest{Id: item.GetProductId()})
+		if status.Code(err) == codes.NotFound {
+			return nil, status.Errorf(codes.FailedPrecondition, "cart has product %q, which is not in the catalog", item.GetProductId())
+		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to get product #%q", item.GetProductId())
+			return nil, dependencyError(ctx, err, fmt.Sprintf("failed to get product %q", item.GetProductId()))
 		}
 		price, err := cs.convertCurrency(ctx, product.GetPriceUsd(), userCurrency)
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert price of %q to %s", item.GetProductId(), userCurrency)
+			return nil, err
 		}
 		out[i] = &pb.OrderItem{
 			Item: item,
@@ -357,38 +308,48 @@ func (cs *checkoutService) prepOrderItems(ctx context.Context, items []*pb.CartI
 }
 
 func (cs *checkoutService) convertCurrency(ctx context.Context, from *pb.Money, toCurrency string) (*pb.Money, error) {
-	result, err := pb.NewCurrencyServiceClient(cs.currencySvcConn).Convert(context.TODO(), &pb.CurrencyConversionRequest{
+	result, err := cs.currencySvc.Convert(ctx, &pb.CurrencyConversionRequest{
 		From:   from,
 		ToCode: toCurrency})
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert currency: %+v", err)
+	// Prices and shipping costs are always in USD, so an invalid argument can
+	// only be the user's currency, which comes from the request.
+	if status.Code(err) == codes.InvalidArgument {
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported user_currency %q", toCurrency)
 	}
-	return result, err
+	if err != nil {
+		return nil, dependencyError(ctx, err, fmt.Sprintf("failed to convert currency to %s", toCurrency))
+	}
+	return result, nil
 }
 
 func (cs *checkoutService) chargeCard(ctx context.Context, amount *pb.Money, paymentInfo *pb.CreditCardInfo) (string, error) {
-	paymentResp, err := pb.NewPaymentServiceClient(cs.paymentSvcConn).Charge(ctx, &pb.ChargeRequest{
+	paymentResp, err := cs.paymentSvc.Charge(ctx, &pb.ChargeRequest{
 		Amount:     amount,
 		CreditCard: paymentInfo})
+	// The card comes from the request: an invalid or expired one is the
+	// caller's error, with the payment service's reason as the message.
+	if status.Code(err) == codes.InvalidArgument {
+		return "", status.Error(codes.InvalidArgument, status.Convert(err).Message())
+	}
 	if err != nil {
-		return "", fmt.Errorf("could not charge the card: %+v", err)
+		return "", dependencyError(ctx, err, "failed to charge card")
 	}
 	return paymentResp.GetTransactionId(), nil
 }
 
 func (cs *checkoutService) sendOrderConfirmation(ctx context.Context, email string, order *pb.OrderResult) error {
-	_, err := pb.NewEmailServiceClient(cs.emailSvcConn).SendOrderConfirmation(ctx, &pb.SendOrderConfirmationRequest{
+	_, err := cs.emailSvc.SendOrderConfirmation(ctx, &pb.SendOrderConfirmationRequest{
 		Email: email,
 		Order: order})
 	return err
 }
 
 func (cs *checkoutService) shipOrder(ctx context.Context, address *pb.Address, items []*pb.CartItem) (string, error) {
-	resp, err := pb.NewShippingServiceClient(cs.shippingSvcConn).ShipOrder(ctx, &pb.ShipOrderRequest{
+	resp, err := cs.shippingSvc.ShipOrder(ctx, &pb.ShipOrderRequest{
 		Address: address,
 		Items:   items})
 	if err != nil {
-		return "", fmt.Errorf("shipment failed: %+v", err)
+		return "", dependencyError(ctx, err, "failed to ship order")
 	}
 	return resp.GetTrackingId(), nil
 }

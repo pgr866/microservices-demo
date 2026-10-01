@@ -14,12 +14,26 @@
 
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 using cartservice;
+using cartservice.logging;
 
 CreateHostBuilder(args).Build().Run();
 
 static IHostBuilder CreateHostBuilder(string[] args) =>
     Host.CreateDefaultBuilder(args)
+        // JSON logs, like the other services.
+        .ConfigureLogging(logging =>
+        {
+            logging.ClearProviders();
+            logging.AddConsole(options => options.FormatterName = JsonLogFormatter.FormatterName);
+            // Registered directly: AddConsoleFormatter<,> binds options from configuration
+            // through reflection, unsafe in the trimmed image, and this formatter has none.
+            logging.Services.TryAddEnumerable(ServiceDescriptor.Singleton<ConsoleFormatter, JsonLogFormatter>());
+        })
         .ConfigureWebHostDefaults(webBuilder =>
         {
             webBuilder.UseStartup<Startup>();

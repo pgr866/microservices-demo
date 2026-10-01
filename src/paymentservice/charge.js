@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+const crypto = require('crypto');
+const { status } = require('@grpc/grpc-js');
 const cardValidator = require('simple-card-validator');
-const { v4: uuidv4 } = require('uuid');
 const pino = require('pino');
 
 const logger = pino({
   name: 'paymentservice-charge',
   messageKey: 'message',
   formatters: {
-    level (logLevelString, logLevelNum) {
+    level (logLevelString) {
       return { severity: logLevelString }
     }
   }
@@ -30,12 +31,12 @@ const logger = pino({
 class CreditCardError extends Error {
   constructor (message) {
     super(message);
-    this.code = 400; // Invalid argument error
+    this.code = status.INVALID_ARGUMENT;
   }
 }
 
 class InvalidCreditCard extends CreditCardError {
-  constructor (cardType) {
+  constructor () {
     super(`Credit card info is invalid`);
   }
 }
@@ -48,8 +49,24 @@ class UnacceptedCreditCard extends CreditCardError {
 
 class ExpiredCreditCard extends CreditCardError {
   constructor (number, month, year) {
-    super(`Your credit card (ending ${number.substr(-4)}) expired on ${month}/${year}`);
+    super(`Your credit card (ending ${number.substr(-4)}) expired on ${month}\/${year}`);
   }
+}
+
+class InvalidAmount extends Error {
+  constructor () {
+    super('The amount to charge must be positive and have a currency code');
+    this.code = status.INVALID_ARGUMENT;
+  }
+}
+
+// A zero or negative amount would be accepted as a charge (a negative one is
+// in effect a refund).
+function isPositiveAmount (amount) {
+  if (!amount?.currency_code) { return false; }
+  const units = Number(amount.units);
+  const nanos = Number(amount.nanos);
+  return units > 0 || (units === 0 && nanos > 0);
 }
 
 /**
@@ -60,6 +77,9 @@ class ExpiredCreditCard extends CreditCardError {
  */
 module.exports = function charge (request) {
   const { amount, credit_card: creditCard } = request;
+  if (!isPositiveAmount(amount)) { throw new InvalidAmount(); }
+  // Checked here because simple-card-validator throws a plain Error without one.
+  if (!creditCard?.credit_card_number) { throw new InvalidCreditCard(); }
   const cardNumber = creditCard.credit_card_number;
   const cardInfo = cardValidator(cardNumber);
   const {
@@ -82,5 +102,7 @@ module.exports = function charge (request) {
   logger.info(`Transaction processed: ${cardType} ending ${cardNumber.substr(-4)} \
     Amount: ${amount.currency_code}${amount.units}.${amount.nanos}`);
 
-  return { transaction_id: uuidv4() };
+  return { transaction_id: crypto.randomUUID() };
 };
+
+module.exports.logger = logger;

@@ -1,0 +1,5 @@
+# Local development only. Watches .java files and rebuilds/restarts on change.
+FROM eclipse-temurin:25.0.4.1_1-jdk-alpine
+RUN apk add --no-cache gcompat watchexec
+WORKDIR /app
+ENTRYPOINT ["watchexec", "--restart", "--poll", "2s", "--watch", "src", "--watch", "build.gradle", "--", "./gradlew", "run", "--no-daemon"]

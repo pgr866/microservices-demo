@@ -15,19 +15,21 @@
 # limitations under the License.
 
 import sys
+
 import grpc
+
 import demo_pb2
 import demo_pb2_grpc
-
 from logger import getJSONLogger
-logger = getJSONLogger('recommendationservice-server')
+
+logger = getJSONLogger('recommendationservice-client')
 
 if __name__ == "__main__":
     # get port
     if len(sys.argv) > 1:
         port = sys.argv[1]
     else:
-        port = "8080"
+        port = "8081"
 
     # set up server stub
     channel = grpc.insecure_channel('localhost:'+port)

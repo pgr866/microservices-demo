@@ -1,0 +1,6 @@
+# Local development only. Watches .cs files and rebuilds/restarts on change.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24
+RUN apk add --no-cache gcompat
+ENV DOTNET_USE_POLLING_FILE_WATCHER=1
+WORKDIR /app
+ENTRYPOINT ["dotnet", "watch", "run", "--project", "src/cartservice.csproj", "--non-interactive"]

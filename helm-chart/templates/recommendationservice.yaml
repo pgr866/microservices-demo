@@ -71,18 +71,18 @@ spec:
           readOnlyRootFilesystem: true
         image: {{ .Values.images.repository }}/{{ .Values.recommendationService.name }}:{{ .Values.images.tag | default .Chart.AppVersion }}
         ports:
-        - containerPort: 8080
+        - containerPort: 8081
         readinessProbe:
           periodSeconds: 5
           grpc:
-            port: 8080
+            port: 8081
         livenessProbe:
           periodSeconds: 5
           grpc:
-            port: 8080
+            port: 8081
         env:
         - name: PORT
-          value: "8080"
+          value: "8081"
         - name: PRODUCT_CATALOG_SERVICE_ADDR
           value: "{{ .Values.productCatalogService.name }}:3550"
         {{- if .Values.opentelemetryCollector.create }}
@@ -115,8 +115,8 @@ spec:
     app: {{ .Values.recommendationService.name }}
   ports:
   - name: grpc
-    port: 8080
-    targetPort: 8080
+    port: 8081
+    targetPort: 8081
 {{- if .Values.networkPolicies.create }}
 ---
 apiVersion: networking.k8s.io/v1
@@ -137,7 +137,7 @@ spec:
         matchLabels:
           app: {{ .Values.frontend.name }}
     ports:
-     - port: 8080
+     - port: 8081
        protocol: TCP
   egress:
   - {}
@@ -188,6 +188,6 @@ spec:
         methods:
         - POST
         ports:
-        - "8080"
+        - "8081"
 {{- end }}
 {{- end }}

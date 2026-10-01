@@ -675,3 +675,8 @@ the rules below could be extracted.
   width: 10px;
   height: 5px;
 }
+
+.error-details {
+    white-space: pre-wrap;
+    word-break: keep-all;
+}

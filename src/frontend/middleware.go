@@ -17,10 +17,10 @@ package main
 import (
 	"context"
 	"net/http"
-	"time"
 	"os"
+	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
@@ -56,7 +56,7 @@ func (r *responseRecorder) WriteHeader(statusCode int) {
 
 func (lh *logHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID, _ := uuid.NewRandom()
+	requestID := uuid.New()
 	ctx = context.WithValue(ctx, ctxKeyRequestID{}, requestID.String())
 
 	start := time.Now()
@@ -66,9 +66,8 @@ func (lh *logHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"http.req.method": r.Method,
 		"http.req.id":     requestID.String(),
 	})
-	if v, ok := r.Context().Value(ctxKeySessionID{}).(string); ok {
-		log = log.WithField("session", v)
-	}
+	// No session ID: it is the only key to the user's cart, so it stays out of
+	// the logs. http.req.id already ties together the lines of a request.
 	log.Debug("request started")
 	defer func() {
 		log.WithFields(logrus.Fields{
@@ -82,27 +81,81 @@ func (lh *logHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	lh.next.ServeHTTP(rr, r)
 }
 
+// maxBodyBytes caps the body of a request: the largest form, the checkout one,
+// is well under 1 KiB.
+const maxBodyBytes = 64 << 10
+
+// contentSecurityPolicy lets the pages load scripts and images only from this
+// site, styles also from the Bootstrap CDN and Google Fonts, and fonts from
+// Google Fonts, so a script injected into a page can't run or send data out.
+// "data:" images are the icons inlined in Bootstrap's CSS.
+const contentSecurityPolicy = "default-src 'self'; " +
+	"script-src 'self'; " +
+	"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com; " +
+	"font-src https://fonts.gstatic.com; " +
+	"img-src 'self' data:; " +
+	"object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+// securityHeaders sets the headers that tell the browser to apply the policy
+// above, not to guess content types, not to show the shop inside another
+// site's frame (clickjacking), and not to send the page address to other sites.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		// "same-origin" still sends it within the shop, which setCurrency
+		// needs to go back to the page the user was on.
+		h.Set("Referrer-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// limitBody stops reading a request body past maxBodyBytes, so a huge upload
+// can't make the server buffer it whole while parsing a form.
+func limitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// withTimeout gives every request a deadline. The handlers pass the request
+// context to their gRPC calls, so the deadline reaches every service down the
+// chain (checkoutservice and recommendationservice pass it on), and a request
+// stuck on a dependency fails with 504 instead of waiting indefinitely.
+func withTimeout(next http.Handler, timeout time.Duration) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func ensureSessionID(next http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var sessionID string
-		c, err := r.Cookie(cookieSessionID)
-		if err == http.ErrNoCookie {
+		// r.Cookie only fails when there is no such cookie.
+		if c, err := r.Cookie(cookieSessionID); err == nil {
+			sessionID = c.Value
+		} else {
 			if os.Getenv("ENABLE_SINGLE_SHARED_SESSION") == "true" {
 				// Hard coded user id, shared across sessions
 				sessionID = "12345678-1234-1234-1234-123456789123"
 			} else {
-				u, _ := uuid.NewRandom()
-				sessionID = u.String()
+				sessionID = uuid.New().String()
 			}
+			// HttpOnly: no script needs the session ID, so an injected one
+			// can't read it either. SameSite=Lax: other sites can't send it
+			// along with their requests (CSRF), except for plain links.
 			http.SetCookie(w, &http.Cookie{
-				Name:   cookieSessionID,
-				Value:  sessionID,
-				MaxAge: cookieMaxAge,
+				Name:     cookieSessionID,
+				Value:    sessionID,
+				MaxAge:   cookieMaxAge,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
 			})
-		} else if err != nil {
-			return
-		} else {
-			sessionID = c.Value
 		}
 		ctx := context.WithValue(r.Context(), ctxKeySessionID{}, sessionID)
 		r = r.WithContext(ctx)

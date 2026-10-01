@@ -17,7 +17,6 @@
 package hipstershop;
 
 import com.google.common.collect.ImmutableListMultimap;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import hipstershop.Demo.Ad;
 import hipstershop.Demo.AdRequest;
@@ -26,7 +25,7 @@ import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.StatusRuntimeException;
 import io.grpc.health.v1.HealthCheckResponse.ServingStatus;
-import io.grpc.services.*;
+import io.grpc.protobuf.services.HealthStatusManager;
 import io.grpc.stub.StreamObserver;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -49,6 +48,12 @@ public final class AdService {
   private HealthStatusManager healthMgr;
 
   private static final AdService service = new AdService();
+
+  /**
+   * Seconds in-flight calls get to finish on SIGTERM: less than the 30 s Kubernetes waits by
+   * default before sending SIGKILL.
+   */
+  private static final long SHUTDOWN_TIMEOUT_SECONDS = 10;
 
   private void start() throws IOException {
     int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "9555"));
@@ -74,14 +79,28 @@ public final class AdService {
     healthMgr.setStatus("", ServingStatus.SERVING);
   }
 
+  /**
+   * Reports NOT_SERVING to the probes, stops accepting calls and lets the ones in flight finish,
+   * but no longer than SHUTDOWN_TIMEOUT_SECONDS: then it cuts the rest. It used to return right
+   * after starting the shutdown, so the JVM exited with the calls still in flight.
+   */
   private void stop() {
     if (server != null) {
-      healthMgr.clearStatus("");
+      healthMgr.enterTerminalState();
       server.shutdown();
+      try {
+        if (!server.awaitTermination(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+          System.err.println("*** calls still in flight, cutting them");
+          server.shutdownNow();
+        }
+      } catch (InterruptedException e) {
+        server.shutdownNow();
+        Thread.currentThread().interrupt();
+      }
     }
   }
 
-  private static class AdServiceImpl extends hipstershop.AdServiceGrpc.AdServiceImplBase {
+  static class AdServiceImpl extends hipstershop.AdServiceGrpc.AdServiceImplBase {
 
     /**
      * Retrieves ads based on context provided in the request {@code AdRequest}.
@@ -141,9 +160,7 @@ public final class AdService {
 
   /** Await termination on the main thread since the grpc library uses daemon threads. */
   private void blockUntilShutdown() throws InterruptedException {
-    if (server != null) {
-      server.awaitTermination();
-    }
+    if (server != null) server.awaitTermination();
   }
 
   private static ImmutableListMultimap<String, Ad> createAdsMap() {
@@ -192,43 +209,8 @@ public final class AdService {
         .build();
   }
 
-  private static void initStats() {
-    if (System.getenv("DISABLE_STATS") != null) {
-      logger.info("Stats disabled.");
-      return;
-    }
-    logger.info("Stats enabled, but temporarily unavailable");
-
-    long sleepTime = 10; /* seconds */
-    int maxAttempts = 5;
-
-    // TODO(arbrown) Implement OpenTelemetry stats
-
-  }
-
-  private static void initTracing() {
-    if (System.getenv("DISABLE_TRACING") != null) {
-      logger.info("Tracing disabled.");
-      return;
-    }
-    logger.info("Tracing enabled but temporarily unavailable");
-    logger.info("See https://github.com/GoogleCloudPlatform/microservices-demo/issues/422 for more info.");
-
-    // TODO(arbrown) Implement OpenTelemetry tracing
-    
-    logger.info("Tracing enabled - Stackdriver exporter initialized.");
-  }
-
   /** Main launches the server from the command line. */
   public static void main(String[] args) throws IOException, InterruptedException {
-
-    new Thread(
-            () -> {
-              initStats();
-              initTracing();
-            })
-        .start();
-
     // Start the RPC server. You shouldn't see any output from gRPC before this.
     logger.info("AdService starting.");
     final AdService service = AdService.getInstance();

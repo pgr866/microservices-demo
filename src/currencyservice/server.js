@@ -19,59 +19,11 @@ const logger = pino({
   name: 'currencyservice-server',
   messageKey: 'message',
   formatters: {
-    level (logLevelString, logLevelNum) {
+    level (logLevelString) {
       return { severity: logLevelString }
     }
   }
 });
-
-if(process.env.DISABLE_PROFILER) {
-  logger.info("Profiler disabled.")
-}
-else {
-  logger.info("Profiler enabled.")
-  require('@google-cloud/profiler').start({
-    serviceContext: {
-      service: 'currencyservice',
-      version: '1.0.0'
-    }
-  });
-}
-
-// Register GRPC OTel Instrumentation for trace propagation
-// regardless of whether tracing is emitted.
-const { GrpcInstrumentation } = require('@opentelemetry/instrumentation-grpc');
-const { registerInstrumentations } = require('@opentelemetry/instrumentation');
-
-registerInstrumentations({
-  instrumentations: [new GrpcInstrumentation()]
-});
-
-if(process.env.ENABLE_TRACING == "1") {
-  logger.info("Tracing enabled.")
-
-  const { resourceFromAttributes } = require('@opentelemetry/resources');
-
-  const { ATTR_SERVICE_NAME } = require('@opentelemetry/semantic-conventions');
-
-  const opentelemetry = require('@opentelemetry/sdk-node');
-
-  const { OTLPTraceExporter } = require('@opentelemetry/exporter-otlp-grpc');
-
-  const collectorUrl = process.env.COLLECTOR_SERVICE_ADDR;
-  const traceExporter = new OTLPTraceExporter({url: collectorUrl});
-  const sdk = new opentelemetry.NodeSDK({
-    resource: resourceFromAttributes({
-      [ ATTR_SERVICE_NAME ]: process.env.OTEL_SERVICE_NAME || 'currencyservice',
-    }),
-    traceExporter: traceExporter,
-  });
-
-  sdk.start()
-}
-else {
-  logger.info("Tracing disabled.")
-}
 
 const path = require('path');
 const grpc = require('@grpc/grpc-js');
@@ -126,7 +78,7 @@ function _carry (amount) {
  * Lists the supported currencies
  */
 function getSupportedCurrencies (call, callback) {
-  logger.info('Getting supported currencies...');
+  logger.info('Getting supported currencies..\.');
   _getCurrencyData((data) => {
     callback(null, {currency_codes: Object.keys(data)});
   });
@@ -139,6 +91,15 @@ function convert (call, callback) {
   try {
     _getCurrencyData((data) => {
       const request = call.request;
+
+      // An unknown code would turn the amount into NaN, which is sent as 0.
+      for (const code of [request.from?.currency_code, request.to_code]) {
+        if (!Object.hasOwn(data, code ?? '')) {
+          logger.warn(`conversion request rejected: unsupported currency code "${code ?? ''}"`);
+          callback({ code: grpc.status.INVALID_ARGUMENT, message: `unsupported currency code "${code ?? ''}"` });
+          return;
+        }
+      }
 
       // Convert: from_currency --> EUR
       const from = request.from;
@@ -164,7 +125,7 @@ function convert (call, callback) {
     });
   } catch (err) {
     logger.error(`conversion request failed: ${err}`);
-    callback(err.message);
+    callback({ code: grpc.status.INTERNAL, message: err.message });
   }
 }
 
@@ -173,6 +134,43 @@ function convert (call, callback) {
  */
 function check (call, callback) {
   callback(null, { status: 'SERVING' });
+}
+
+// How long in-flight calls get to finish on SIGTERM: less than the 30 s
+// Kubernetes waits by default before sending SIGKILL.
+const SHUTDOWN_TIMEOUT_MS = 10000;
+
+/**
+ * Stops the server, letting in-flight calls finish but no longer than
+ * timeoutMs: then it cuts the rest. Resolves once the server is stopped.
+ */
+function gracefulShutdown (server, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      logger.warn(`calls still in flight after ${timeoutMs} ms, cutting them`);
+      server.forceShutdown();
+      resolve();
+    }, timeoutMs);
+    server.tryShutdown(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/**
+ * Stops the server gracefully on SIGTERM (what Kubernetes sends to delete a
+ * pod) and SIGINT, then exits. As PID 1 in the container, Node used to ignore
+ * SIGTERM, so the pod only died with the SIGKILL sent 30 s later.
+ */
+function stopOnSignals (server) {
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    process.once(signal, async () => {
+      logger.info(`received ${signal}, shutting down`);
+      await gracefulShutdown(server);
+      process.exit(0);
+    });
+  }
 }
 
 /**
@@ -190,9 +188,13 @@ function main () {
     grpc.ServerCredentials.createInsecure(),
     function() {
       logger.info(`CurrencyService gRPC server started on port ${PORT}`);
-      server.start();
     },
    );
+  stopOnSignals(server);
 }
 
-main();
+module.exports = { _carry, convert, getSupportedCurrencies, check, gracefulShutdown, stopOnSignals };
+
+if (require.main === module) {
+  main();
+}

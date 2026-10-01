@@ -15,41 +15,24 @@
 # Define a default value so it's not empty if the builder fails to provide it
 ARG BUILDPLATFORM=linux/amd64
 
-FROM --platform=$BUILDPLATFORM python:3.14.7-alpine@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc AS base
+FROM --platform=$BUILDPLATFORM python:3.14.7-alpine@sha256:9e9fde4d32eedce0b661d9ab91e826b62dddf28e928c230ec55f1866cac66b01 AS base
 
 FROM base AS builder
-
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-
-RUN apk update \
-    && apk add --no-cache g++ linux-headers \
-    && rm -rf /var/cache/apk/*
-
-# get packages
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip uninstall -y pip
 
 FROM base
-
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-
-RUN apk update \
-    && apk add --no-cache libstdc++ \
-    && rm -rf /var/cache/apk/*
-
-# get packages
-WORKDIR /recommendationservice
-
-# Grab packages from builder
-COPY --from=builder /usr/local/lib/python3.14/ /usr/local/lib/python3.14/
-
-# Add the application
-COPY . .
-
-# set listen port
-ENV PORT="8080"
-EXPOSE 8080
-
+RUN python -m pip uninstall -y pip \
+    && addgroup -g 1000 recommendationservice \
+    && adduser -D -u 1000 -G recommendationservice recommendationservice
+WORKDIR /app
+COPY --from=builder --chown=recommendationservice:recommendationservice /usr/local/lib/python3.14/site-packages/ /usr/local/lib/python3.14/site-packages/
+COPY --chown=recommendationservice:recommendationservice . .
+USER recommendationservice
+EXPOSE 8081
 ENTRYPOINT ["python", "recommendation_server.py"]

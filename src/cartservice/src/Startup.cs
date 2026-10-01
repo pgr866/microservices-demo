@@ -1,15 +1,11 @@
-using System;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using cartservice.cartstore;
 using cartservice.services;
-using Microsoft.Extensions.Caching.StackExchangeRedis;
 
 namespace cartservice
 {
@@ -21,41 +17,23 @@ namespace cartservice
         }
 
         public IConfiguration Configuration { get; }
-        
+
         // This method gets called by the runtime. Use this method to add services to the container.
         // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
         public void ConfigureServices(IServiceCollection services)
         {
             string redisAddress = Configuration["REDIS_ADDR"];
-            string spannerProjectId = Configuration["SPANNER_PROJECT"];
-            string spannerConnectionString = Configuration["SPANNER_CONNECTION_STRING"];
-            string alloyDBConnectionString = Configuration["ALLOYDB_PRIMARY_IP"];
 
             if (!string.IsNullOrEmpty(redisAddress))
             {
-                services.AddStackExchangeRedisCache(options =>
-                {
-                    options.Configuration = redisAddress;
-                });
-                services.AddSingleton<ICartStore, RedisCartStore>();
-            }
-            else if (!string.IsNullOrEmpty(spannerProjectId) || !string.IsNullOrEmpty(spannerConnectionString))
-            {
-                services.AddSingleton<ICartStore, SpannerCartStore>();
-            }
-            else if (!string.IsNullOrEmpty(alloyDBConnectionString))
-            {
-                Console.WriteLine("Creating AlloyDB cart store");
-                services.AddSingleton<ICartStore, AlloyDBCartStore>();
+                services.AddSingleton<ICartStorage>(new RedisCartStorage(redisAddress));
             }
             else
             {
-                Console.WriteLine("Redis cache host(hostname+port) was not specified. Starting a cart service using in memory store");
-                services.AddDistributedMemoryCache();
-                services.AddSingleton<ICartStore, RedisCartStore>();
+                services.AddSingleton<ICartStorage, InMemoryCartStorage>();
             }
 
-
+            services.AddSingleton<ICartStore, CartStore>();
             services.AddGrpc();
         }
 

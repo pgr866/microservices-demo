@@ -21,21 +21,12 @@ import (
 
 	pb "github.com/GoogleCloudPlatform/microservices-demo/src/productcatalogservice/genproto"
 	"google.golang.org/grpc/codes"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 )
 
 type productCatalog struct {
 	pb.UnimplementedProductCatalogServiceServer
 	catalog pb.ListProductsResponse
-}
-
-func (p *productCatalog) Check(ctx context.Context, req *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
-	return &healthpb.HealthCheckResponse{Status: healthpb.HealthCheckResponse_SERVING}, nil
-}
-
-func (p *productCatalog) Watch(req *healthpb.HealthCheckRequest, ws healthpb.Health_WatchServer) error {
-	return status.Errorf(codes.Unimplemented, "health check via Watch not implemented")
 }
 
 func (p *productCatalog) ListProducts(context.Context, *pb.Empty) (*pb.ListProductsResponse, error) {
@@ -72,12 +63,18 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) parseCatalog() []*pb.Product {
-	if reloadCatalog || len(p.catalog.Products) == 0 {
+	catalogMutex.RLock()
+	empty := len(p.catalog.Products) == 0
+	catalogMutex.RUnlock()
+
+	if reloadCatalog.Load() || empty {
 		err := loadCatalog(&p.catalog)
 		if err != nil {
 			return []*pb.Product{}
 		}
 	}
 
+	catalogMutex.RLock()
+	defer catalogMutex.RUnlock()
 	return p.catalog.Products
 }

@@ -14,10 +14,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# [START gke_paymentservice_genproto]
-
-# protos are loaded dynamically for node, simply copies over the proto.
 mkdir -p proto
 cp -r ../../protos/* ./proto
-
-# [END gke_paymentservice_genproto]

@@ -15,10 +15,12 @@
 package main
 
 import (
+	"context"
 	"regexp"
 	"testing"
 
-	"golang.org/x/net/context"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/GoogleCloudPlatform/microservices-demo/src/shippingservice/genproto"
 )
@@ -202,5 +204,31 @@ func TestQuoteString(t *testing.T) {
 	expected := "$8.99"
 	if q.String() != expected {
 		t.Errorf("Quote.String() = '%s', want '%s'", q.String(), expected)
+	}
+}
+
+func TestGetQuoteInvalidQuantity(t *testing.T) {
+	s := server{}
+	for _, quantity := range []int32{0, -1} {
+		// The negative item would cancel out the other one and make the shipping free.
+		req := &pb.GetQuoteRequest{Items: []*pb.CartItem{
+			{ProductId: "A", Quantity: 1},
+			{ProductId: "B", Quantity: quantity},
+		}}
+
+		_, err := s.GetQuote(context.Background(), req)
+		if got := status.Code(err); got != codes.InvalidArgument {
+			t.Errorf("quantity %d: status code = %v, want %v", quantity, got, codes.InvalidArgument)
+		}
+	}
+}
+
+func TestShipOrderWithoutAddress(t *testing.T) {
+	s := server{}
+
+	// Used to dereference a nil pointer and crash the whole server.
+	_, err := s.ShipOrder(context.Background(), &pb.ShipOrderRequest{})
+	if got := status.Code(err); got != codes.InvalidArgument {
+		t.Errorf("status code = %v, want %v", got, codes.InvalidArgument)
 	}
 }
