@@ -18,7 +18,7 @@ const protoLoader = require('@grpc/proto-loader');
 
 const charge = require('./charge');
 
-const logger = require('./logger')
+const logger = require('./logger');
 
 // How long in-flight calls get to finish on SIGTERM: less than the 30 s
 // Kubernetes waits by default before sending SIGKILL.
@@ -28,7 +28,7 @@ const SHUTDOWN_TIMEOUT_MS = 10000;
  * Stops the server, letting in-flight calls finish but no longer than
  * timeoutMs: then it cuts the rest. Resolves once the server is stopped.
  */
-function gracefulShutdown (server, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
+function gracefulShutdown(server, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       logger.warn(`calls still in flight after ${timeoutMs} ms, cutting them`);
@@ -44,10 +44,10 @@ function gracefulShutdown (server, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
 
 /**
  * Stops the server gracefully on SIGTERM (what Kubernetes sends to delete a
- * pod) and SIGINT, then exits. As PID 1 in the container, Node used to ignore
- * SIGTERM, so the pod only died with the SIGKILL sent 30 s later.
+ * pod) and SIGINT, then exits. Node, as PID 1 in the container, would
+ * otherwise ignore SIGTERM until the SIGKILL sent 30 s later.
  */
-function stopOnSignals (server) {
+function stopOnSignals(server) {
   for (const signal of ['SIGTERM', 'SIGINT']) {
     process.once(signal, async () => {
       logger.info(`received ${signal}, shutting down`);
@@ -63,18 +63,15 @@ class HipsterShopServer {
 
     this.packages = {
       hipsterShop: this.loadProto(path.join(protoRoot, 'demo.proto')),
-      health: this.loadProto(path.join(protoRoot, 'grpc/health/v1/health.proto'))
+      health: this.loadProto(
+        path.join(protoRoot, 'grpc/health/v1/health.proto'),
+      ),
     };
 
     this.server = new grpc.Server();
     this.loadAllProtos();
   }
 
-  /**
-   * Handler for PaymentService.Charge.
-   * @param {*} call  { ChargeRequest }
-   * @param {*} callback  fn(err, ChargeResponse)
-   */
   static ChargeServiceHandler(call, callback) {
     try {
       // Not the request itself: it carries the full card number and CVV, which
@@ -85,7 +82,10 @@ class HipsterShopServer {
     } catch (err) {
       logger.warn(`PaymentService#Charge failed: ${err.message}`);
       // Card errors carry INVALID_ARGUMENT; anything else is a bug.
-      callback({ code: err.code ?? grpc.status.INTERNAL, message: err.message });
+      callback({
+        code: err.code ?? grpc.status.INTERNAL,
+        message: err.message,
+      });
     }
   }
 
@@ -93,30 +93,26 @@ class HipsterShopServer {
     callback(null, { status: 'SERVING' });
   }
 
-
   listen() {
-    const server = this.server 
-    const port = this.port
+    const server = this.server;
+    const port = this.port;
     server.bindAsync(
       `[::]:${port}`,
       grpc.ServerCredentials.createInsecure(),
       function () {
         logger.info(`PaymentService gRPC server started on port ${port}`);
-      }
+      },
     );
   }
 
   loadProto(path) {
-    const packageDefinition = protoLoader.loadSync(
-      path,
-      {
-        keepCase: true,
-        longs: String,
-        enums: String,
-        defaults: true,
-        oneofs: true
-      }
-    );
+    const packageDefinition = protoLoader.loadSync(path, {
+      keepCase: true,
+      longs: String,
+      enums: String,
+      defaults: true,
+      oneofs: true,
+    });
     return grpc.loadPackageDefinition(packageDefinition);
   }
 
@@ -124,19 +120,13 @@ class HipsterShopServer {
     const hipsterShopPackage = this.packages.hipsterShop.hipstershop;
     const healthPackage = this.packages.health.grpc.health.v1;
 
-    this.server.addService(
-      hipsterShopPackage.PaymentService.service,
-      {
-        charge: HipsterShopServer.ChargeServiceHandler.bind(this)
-      }
-    );
+    this.server.addService(hipsterShopPackage.PaymentService.service, {
+      charge: HipsterShopServer.ChargeServiceHandler.bind(this),
+    });
 
-    this.server.addService(
-      healthPackage.Health.service,
-      {
-        check: HipsterShopServer.CheckHandler.bind(this)
-      }
-    );
+    this.server.addService(healthPackage.Health.service, {
+      check: HipsterShopServer.CheckHandler.bind(this),
+    });
   }
 }
 

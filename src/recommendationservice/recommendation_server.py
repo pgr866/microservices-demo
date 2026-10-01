@@ -25,7 +25,7 @@ import demo_pb2
 import demo_pb2_grpc
 from logger import getJSONLogger
 
-logger = getJSONLogger('recommendationservice-server')
+logger = getJSONLogger("recommendationservice-server")
 
 # Catalog errors worth retrying: reported as UNAVAILABLE, any other one as INTERNAL.
 TRANSIENT_CODES = {
@@ -41,28 +41,34 @@ class RecommendationService(demo_pb2_grpc.RecommendationServiceServicer):
 
     def ListRecommendations(self, request, context):
         max_responses = 5
-        # fetch list of products from product catalog stub
         try:
             # Same deadline as the incoming call, so the catalog stops waiting when the caller does.
             cat_response = self.product_catalog_stub.ListProducts(
-                demo_pb2.Empty(), timeout=context.time_remaining())
+                demo_pb2.Empty(), timeout=context.time_remaining()
+            )
         except grpc.RpcError as err:
-            code = grpc.StatusCode.UNAVAILABLE if err.code() in TRANSIENT_CODES else grpc.StatusCode.INTERNAL
+            code = (
+                grpc.StatusCode.UNAVAILABLE
+                if err.code() in TRANSIENT_CODES
+                else grpc.StatusCode.INTERNAL
+            )
             logger.warning(f"failed to list products: {err.code()} {err.details()}")
             context.abort(code, f"failed to list products: {err.details()}")
         product_ids = [x.id for x in cat_response.products]
-        filtered_products = list(set(product_ids)-set(request.product_ids))
-        # sample up to max_responses of the products not already in the request
-        prod_list = random.sample(filtered_products, min(max_responses, len(filtered_products)))
+        filtered_products = list(set(product_ids) - set(request.product_ids))
+        prod_list = random.sample(
+            filtered_products, min(max_responses, len(filtered_products))
+        )
         logger.info(f"[Recv ListRecommendations] product_ids={prod_list}")
         return demo_pb2.ListRecommendationsResponse(product_ids=prod_list)
 
     def Check(self, request, context):
         return health_pb2.HealthCheckResponse(
-            status=health_pb2.HealthCheckResponse.SERVING)
+            status=health_pb2.HealthCheckResponse.SERVING
+        )
 
     def Watch(self, request, context):
-        context.abort(grpc.StatusCode.UNIMPLEMENTED, 'Watch is not implemented')
+        context.abort(grpc.StatusCode.UNIMPLEMENTED, "Watch is not implemented")
 
 
 # How long in-flight calls get to finish on SIGTERM: less than the 30 s
@@ -73,8 +79,9 @@ SHUTDOWN_GRACE_SECONDS = 10
 def stop_on_signals(server):
     """Stops the server gracefully on SIGTERM (what Kubernetes sends to delete a
     pod) and SIGINT, giving in-flight calls SHUTDOWN_GRACE_SECONDS to finish. As
-    PID 1 in the container, Python used to ignore SIGTERM, so the pod only died
-    with the SIGKILL sent 30 s later."""
+    PID 1 in the container, Python would otherwise ignore SIGTERM until the
+    SIGKILL sent 30 s later."""
+
     def handle(signum, _frame):
         logger.info(f"received {signal.Signals(signum).name}, shutting down")
         server.stop(SHUTDOWN_GRACE_SECONDS)
@@ -84,10 +91,10 @@ def stop_on_signals(server):
 
 
 def start():
-    port = os.environ.get('PORT', "8081")
-    catalog_addr = os.environ.get('PRODUCT_CATALOG_SERVICE_ADDR', '')
+    port = os.environ.get("PORT", "8081")
+    catalog_addr = os.environ.get("PRODUCT_CATALOG_SERVICE_ADDR", "")
     if catalog_addr == "":
-        raise RuntimeError('PRODUCT_CATALOG_SERVICE_ADDR environment variable not set')
+        raise RuntimeError("PRODUCT_CATALOG_SERVICE_ADDR environment variable not set")
     logger.info("product catalog address: " + catalog_addr)
     channel = grpc.insecure_channel(catalog_addr)
 
@@ -98,7 +105,7 @@ def start():
     health_pb2_grpc.add_HealthServicer_to_server(service, server)
 
     logger.info("listening on port: " + port)
-    server.add_insecure_port('[::]:'+port)
+    server.add_insecure_port("[::]:" + port)
     server.start()
     stop_on_signals(server)
     server.wait_for_termination()

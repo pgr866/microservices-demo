@@ -94,8 +94,8 @@ func main() {
 	}
 }
 
-// mustConnGRPC creates a client connection to the address set in envKey. The
-// connection is lazy: nothing is dialed until the first RPC.
+// mustConnGRPC connects lazily to the address in envKey: nothing is dialed
+// until the first RPC.
 func mustConnGRPC(envKey string) *grpc.ClientConn {
 	addr := os.Getenv(envKey)
 	if addr == "" {
@@ -177,12 +177,10 @@ func validatePlaceOrderRequest(req *pb.PlaceOrderRequest) error {
 	return nil
 }
 
-// dependencyError turns the error of a call to another service into the status
-// PlaceOrder returns. The dependency's own code is not passed through as is: a
-// NotFound from the catalog, for example, would look as if the order itself did
-// not exist. Only a failure worth retrying stays Unavailable; any other one is
-// Internal. Callers handle beforehand the codes they can map to something more
-// specific (e.g. an invalid card).
+// dependencyError maps the error of a call to another service: Unavailable if
+// retrying is worth it, Internal otherwise. The dependency's own code isn't
+// passed through, since a NotFound from the catalog would look as if the order
+// itself did not exist.
 func dependencyError(ctx context.Context, err error, msg string) error {
 	code := codes.Internal
 	switch {

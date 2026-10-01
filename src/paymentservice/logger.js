@@ -20,8 +20,8 @@ module.exports = pino({
   name: 'paymentservice-server',
   messageKey: 'message',
   formatters: {
-    level (logLevelString) {
-      return { severity: logLevelString }
-    }
-  }
+    level(logLevelString) {
+      return { severity: logLevelString };
+    },
+  },
 });

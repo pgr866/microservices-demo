@@ -51,3 +51,12 @@ Use `reviewdog/action-eslint` action, which annotates the PR inline. **Non-block
 docker run --rm -v "$(pwd):/app" -w /app node:24.21.0-alpine \
   sh -c 'npm ci && npm run lint'
 ```
+
+## Formatting
+
+Formats the code in place with Prettier (`.prettierrc.json`). CI runs `npx prettier --check "*.js"` instead, which only lists the files that need formatting. **Non-blocking**: informative only, never fails the CI.
+
+```bash
+docker run --rm -v "$(pwd):/app" -w /app node:24.21.0-alpine \
+  sh -c 'npm ci && npm run format'
+```

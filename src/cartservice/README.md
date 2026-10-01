@@ -57,3 +57,12 @@ Use `reviewdog/action-setup` + `reviewdog -f=dotnet` (`dotnet format` output pip
 docker run --rm -v "$(pwd):/app" -w /app mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24 \
   sh -c 'apk add --no-cache gcompat && dotnet format --verify-no-changes'
 ```
+
+## Formatting
+
+Formats the code in place with `dotnet format`, the same tool the linter runs with `--verify-no-changes`, so CI needs no extra step. It also fixes the deliberate linter finding.
+
+```bash
+docker run --rm -v "$(pwd):/app" -w /app mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24 \
+  sh -c 'apk add --no-cache gcompat && dotnet format'
+```

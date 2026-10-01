@@ -121,10 +121,9 @@ func limitBody(next http.Handler) http.Handler {
 	})
 }
 
-// withTimeout gives every request a deadline. The handlers pass the request
-// context to their gRPC calls, so the deadline reaches every service down the
-// chain (checkoutservice and recommendationservice pass it on), and a request
-// stuck on a dependency fails with 504 instead of waiting indefinitely.
+// withTimeout gives every request a deadline, which the handlers pass on to
+// their gRPC calls: a request stuck on a dependency fails with 504 instead of
+// waiting indefinitely.
 func withTimeout(next http.Handler, timeout time.Duration) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)

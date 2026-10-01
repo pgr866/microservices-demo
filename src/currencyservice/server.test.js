@@ -21,11 +21,17 @@ describe('_carry', () => {
   });
 
   it('carries a fractional unit into nanos', () => {
-    expect(_carry({ units: 10.5, nanos: 0 })).toEqual({ units: 10, nanos: 500000000 });
+    expect(_carry({ units: 10.5, nanos: 0 })).toEqual({
+      units: 10,
+      nanos: 500000000,
+    });
   });
 
   it('carries nanos overflow into units', () => {
-    expect(_carry({ units: 10, nanos: 1500000000 })).toEqual({ units: 11, nanos: 500000000 });
+    expect(_carry({ units: 10, nanos: 1500000000 })).toEqual({
+      units: 11,
+      nanos: 500000000,
+    });
   });
 });
 
@@ -33,8 +39,13 @@ describe('convert', () => {
   it('converts between two currencies using the real conversion table', () => {
     const callback = jest.fn();
     convert(
-      { request: { from: { currency_code: 'EUR', units: 10, nanos: 0 }, to_code: 'USD' } },
-      callback
+      {
+        request: {
+          from: { currency_code: 'EUR', units: 10, nanos: 0 },
+          to_code: 'USD',
+        },
+      },
+      callback,
     );
 
     expect(callback).toHaveBeenCalledTimes(1);
@@ -51,8 +62,13 @@ describe('convert', () => {
   it('round-trips EUR to EUR as a no-op', () => {
     const callback = jest.fn();
     convert(
-      { request: { from: { currency_code: 'EUR', units: 42, nanos: 0 }, to_code: 'EUR' } },
-      callback
+      {
+        request: {
+          from: { currency_code: 'EUR', units: 42, nanos: 0 },
+          to_code: 'EUR',
+        },
+      },
+      callback,
     );
 
     expect(callback).toHaveBeenCalledWith(null, {
@@ -65,10 +81,25 @@ describe('convert', () => {
 
 describe('convert with invalid input', () => {
   it.each([
-    ['an unsupported target currency', { from: { currency_code: 'EUR', units: 1, nanos: 0 }, to_code: 'XYZ' }, 'XYZ'],
-    ['an unsupported source currency', { from: { currency_code: 'XYZ', units: 1, nanos: 0 }, to_code: 'EUR' }, 'XYZ'],
+    [
+      'an unsupported target currency',
+      { from: { currency_code: 'EUR', units: 1, nanos: 0 }, to_code: 'XYZ' },
+      'XYZ',
+    ],
+    [
+      'an unsupported source currency',
+      { from: { currency_code: 'XYZ', units: 1, nanos: 0 }, to_code: 'EUR' },
+      'XYZ',
+    ],
     ['a missing amount', { from: null, to_code: 'EUR' }, ''],
-    ['a prototype key as currency', { from: { currency_code: 'EUR', units: 1, nanos: 0 }, to_code: 'toString' }, 'toString'],
+    [
+      'a prototype key as currency',
+      {
+        from: { currency_code: 'EUR', units: 1, nanos: 0 },
+        to_code: 'toString',
+      },
+      'toString',
+    ],
   ])('rejects %s with INVALID_ARGUMENT', (_name, request, code) => {
     const callback = jest.fn();
     convert({ request }, callback);
@@ -88,7 +119,9 @@ describe('getSupportedCurrencies', () => {
     expect(callback).toHaveBeenCalledTimes(1);
     const [err, result] = callback.mock.calls[0];
     expect(err).toBeNull();
-    expect(result.currency_codes).toEqual(expect.arrayContaining(['EUR', 'USD']));
+    expect(result.currency_codes).toEqual(
+      expect.arrayContaining(['EUR', 'USD']),
+    );
   });
 });
 
@@ -125,15 +158,21 @@ describe('graceful shutdown', () => {
     expect(server.forceShutdown).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['SIGTERM', 'SIGINT'])('shuts down and exits on %s', async (signal) => {
-    const exit = jest.spyOn(process, 'exit').mockImplementation(() => {});
-    const server = { tryShutdown: jest.fn((done) => done()), forceShutdown: jest.fn() };
-    stopOnSignals(server);
+  it.each(['SIGTERM', 'SIGINT'])(
+    'shuts down and exits on %s',
+    async (signal) => {
+      const exit = jest.spyOn(process, 'exit').mockImplementation(() => {});
+      const server = {
+        tryShutdown: jest.fn((done) => done()),
+        forceShutdown: jest.fn(),
+      };
+      stopOnSignals(server);
 
-    process.emit(signal);
-    await new Promise(setImmediate);
+      process.emit(signal);
+      await new Promise(setImmediate);
 
-    expect(server.tryShutdown).toHaveBeenCalledTimes(1);
-    expect(exit).toHaveBeenCalledWith(0);
-  });
+      expect(server.tryShutdown).toHaveBeenCalledTimes(1);
+      expect(exit).toHaveBeenCalledWith(0);
+    },
+  );
 });

@@ -22,7 +22,9 @@ describe('HipsterShopServer', () => {
   it('loads the protos and builds a gRPC server without starting a network listener', () => {
     const server = new HipsterShopServer(PROTO_PATH, 50052);
     expect(server.server).toBeInstanceOf(grpc.Server);
-    expect(server.packages.hipsterShop.hipstershop.PaymentService).toBeDefined();
+    expect(
+      server.packages.hipsterShop.hipstershop.PaymentService,
+    ).toBeDefined();
     expect(server.packages.health.grpc.health.v1.Health).toBeDefined();
   });
 
@@ -75,18 +77,26 @@ describe('HipsterShopServer', () => {
 
       expect(callback).toHaveBeenCalledTimes(1);
       const [err] = callback.mock.calls[0];
-      expect(err).toEqual({ code: grpc.status.INVALID_ARGUMENT, message: 'Credit card info is invalid' });
+      expect(err).toEqual({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Credit card info is invalid',
+      });
     });
 
     it('responds INTERNAL to an unexpected error', () => {
       jest.isolateModules(() => {
-        jest.doMock('./charge', () => () => { throw new Error('boom'); });
+        jest.doMock('./charge', () => () => {
+          throw new Error('boom');
+        });
         const IsolatedServer = require('./server');
         const callback = jest.fn();
 
         IsolatedServer.ChargeServiceHandler({ request: {} }, callback);
 
-        expect(callback).toHaveBeenCalledWith({ code: grpc.status.INTERNAL, message: 'boom' });
+        expect(callback).toHaveBeenCalledWith({
+          code: grpc.status.INTERNAL,
+          message: 'boom',
+        });
       });
       jest.dontMock('./charge');
     });
@@ -118,17 +128,23 @@ describe('graceful shutdown', () => {
     expect(server.forceShutdown).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['SIGTERM', 'SIGINT'])('shuts down and exits on %s', async (signal) => {
-    const exit = jest.spyOn(process, 'exit').mockImplementation(() => {});
-    const server = { tryShutdown: jest.fn((done) => done()), forceShutdown: jest.fn() };
-    stopOnSignals(server);
+  it.each(['SIGTERM', 'SIGINT'])(
+    'shuts down and exits on %s',
+    async (signal) => {
+      const exit = jest.spyOn(process, 'exit').mockImplementation(() => {});
+      const server = {
+        tryShutdown: jest.fn((done) => done()),
+        forceShutdown: jest.fn(),
+      };
+      stopOnSignals(server);
 
-    process.emit(signal);
-    await new Promise(setImmediate);
+      process.emit(signal);
+      await new Promise(setImmediate);
 
-    expect(server.tryShutdown).toHaveBeenCalledTimes(1);
-    expect(exit).toHaveBeenCalledWith(0);
-  });
+      expect(server.tryShutdown).toHaveBeenCalledTimes(1);
+      expect(exit).toHaveBeenCalledWith(0);
+    },
+  );
 });
 
 describe('logging', () => {
@@ -144,7 +160,9 @@ describe('logging', () => {
     const lines = [];
     for (const l of [logger, chargeLogger].filter(Boolean)) {
       for (const level of ['info', 'warn', 'error']) {
-        jest.spyOn(l, level).mockImplementation((msg) => { lines.push(String(msg)); });
+        jest.spyOn(l, level).mockImplementation((msg) => {
+          lines.push(String(msg));
+        });
       }
     }
     const call = {

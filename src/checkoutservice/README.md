@@ -63,3 +63,12 @@ Use `golangci-lint-action`, which runs the linter itself and annotates the PR na
 docker run --rm -v "$(pwd):/app" -w /app golangci/golangci-lint:v2.14.0-alpine \
   golangci-lint run ./...
 ```
+
+## Formatting
+
+Formats the code in place with `gofmt`. CI runs `gofmt -l .` instead, which only lists the files that need formatting. **Non-blocking**: informative only, never fails the CI.
+
+```bash
+docker run --rm -v "$(pwd):/app" -w /app golang:1.27.1-alpine \
+  gofmt -l -w .
+```

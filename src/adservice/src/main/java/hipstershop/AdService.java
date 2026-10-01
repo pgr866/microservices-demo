@@ -81,8 +81,7 @@ public final class AdService {
 
   /**
    * Reports NOT_SERVING to the probes, stops accepting calls and lets the ones in flight finish,
-   * but no longer than SHUTDOWN_TIMEOUT_SECONDS: then it cuts the rest. It used to return right
-   * after starting the shutdown, so the JVM exited with the calls still in flight.
+   * but no longer than SHUTDOWN_TIMEOUT_SECONDS: then it cuts the rest.
    */
   private void stop() {
     if (server != null) {
@@ -102,13 +101,6 @@ public final class AdService {
 
   static class AdServiceImpl extends hipstershop.AdServiceGrpc.AdServiceImplBase {
 
-    /**
-     * Retrieves ads based on context provided in the request {@code AdRequest}.
-     *
-     * @param req the request containing context.
-     * @param responseObserver the stream observer which gets notified with the value of {@code
-     *     AdResponse}
-     */
     @Override
     public void getAds(AdRequest req, StreamObserver<AdResponse> responseObserver) {
       AdService service = AdService.getInstance();
@@ -124,7 +116,6 @@ public final class AdService {
           allAds = service.getRandomAds();
         }
         if (allAds.isEmpty()) {
-          // Serve random ads.
           allAds = service.getRandomAds();
         }
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
@@ -209,9 +200,7 @@ public final class AdService {
         .build();
   }
 
-  /** Main launches the server from the command line. */
   public static void main(String[] args) throws IOException, InterruptedException {
-    // Start the RPC server. You shouldn't see any output from gRPC before this.
     logger.info("AdService starting.");
     final AdService service = AdService.getInstance();
     service.start();

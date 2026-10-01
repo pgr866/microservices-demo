@@ -191,8 +191,6 @@ func TestHTTPStatusFromCode(t *testing.T) {
 	}
 }
 
-// renderError renders the error page for err as a handler would, returning
-// the response.
 func renderError(t *testing.T, err error, code int) *httptest.ResponseRecorder {
 	t.Helper()
 	logger := logrus.New()

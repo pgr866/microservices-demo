@@ -55,3 +55,12 @@ Use `astral-sh/ruff-action`, which runs the linter itself and annotates the PR n
 docker run --rm -v "$(pwd):/app" -w /app python:3.14.7-alpine \
   sh -c 'pip install -r requirements-test.in && ruff check . --exclude demo_pb2.py,demo_pb2_grpc.py'
 ```
+
+## Formatting
+
+Formats the code in place with `ruff format`. `demo_pb2*.py` excluded as it's generated code. CI runs it with `--check` instead, which only lists the files that need formatting. **Non-blocking**: informative only, never fails the CI.
+
+```bash
+docker run --rm -v "$(pwd):/app" -w /app python:3.14.7-alpine \
+  sh -c 'pip install -r requirements-test.in && ruff format . --exclude demo_pb2.py,demo_pb2_grpc.py'
+```

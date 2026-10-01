@@ -61,7 +61,6 @@ func init() {
 }
 
 func main() {
-	// set injected latency
 	if s := os.Getenv("EXTRA_LATENCY"); s != "" {
 		v, err := time.ParseDuration(s)
 		if err != nil {

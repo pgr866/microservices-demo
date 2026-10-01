@@ -42,33 +42,50 @@ describe('charge', () => {
   });
 
   it('rejects an invalid card number', () => {
-    expect(() => charge(buildRequest('4111111111111112', futureYear, 1)))
-      .toThrow('Credit card info is invalid');
+    expect(() =>
+      charge(buildRequest('4111111111111112', futureYear, 1)),
+    ).toThrow('Credit card info is invalid');
   });
 
   it('rejects card types other than Visa/Mastercard', () => {
-    expect(() => charge(buildRequest('378282246310005', futureYear, 1)))
-      .toThrow(/cannot process/);
+    expect(() =>
+      charge(buildRequest('378282246310005', futureYear, 1)),
+    ).toThrow(/cannot process/);
   });
 
   it('rejects an expired card', () => {
-    expect(() => charge(buildRequest('4111111111111111', pastYear, 1)))
-      .toThrow(/expired/);
+    expect(() => charge(buildRequest('4111111111111111', pastYear, 1))).toThrow(
+      /expired/,
+    );
   });
 
   it.each([
     ['no amount', undefined],
     ['zero', { currency_code: 'USD', units: 0, nanos: 0 }],
     ['negative', { currency_code: 'USD', units: -100, nanos: 0 }],
-    ['negative cents only', { currency_code: 'USD', units: 0, nanos: -500000000 }],
+    [
+      'negative cents only',
+      { currency_code: 'USD', units: 0, nanos: -500000000 },
+    ],
     ['no currency code', { currency_code: '', units: 100, nanos: 0 }],
-  ])('rejects an invalid amount (%s) with INVALID_ARGUMENT', (_name, invalidAmount) => {
-    const request = { ...buildRequest('4111111111111111', futureYear, 1), amount: invalidAmount };
-    expect(() => charge(request)).toThrow(expect.objectContaining({ code: status.INVALID_ARGUMENT }));
-  });
+  ])(
+    'rejects an invalid amount (%s) with INVALID_ARGUMENT',
+    (_name, invalidAmount) => {
+      const request = {
+        ...buildRequest('4111111111111111', futureYear, 1),
+        amount: invalidAmount,
+      };
+      expect(() => charge(request)).toThrow(
+        expect.objectContaining({ code: status.INVALID_ARGUMENT }),
+      );
+    },
+  );
 
   it('charges an amount of only cents', () => {
-    const request = { ...buildRequest('4111111111111111', futureYear, 1), amount: { currency_code: 'USD', units: '0', nanos: 500000000 } };
+    const request = {
+      ...buildRequest('4111111111111111', futureYear, 1),
+      amount: { currency_code: 'USD', units: '0', nanos: 500000000 },
+    };
     expect(charge(request).transaction_id).toBeDefined();
   });
 
@@ -83,7 +100,9 @@ describe('charge', () => {
       buildRequest('4111111111111111', pastYear, 1),
     ];
     for (const request of requests) {
-      expect(() => charge(request)).toThrow(expect.objectContaining({ code: status.INVALID_ARGUMENT }));
+      expect(() => charge(request)).toThrow(
+        expect.objectContaining({ code: status.INVALID_ARGUMENT }),
+      );
     }
   });
 });

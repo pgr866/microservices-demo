@@ -51,3 +51,19 @@ Use `reviewdog/action-setup` + `reviewdog -f=checkstyle` (Checkstyle XML, `build
 docker run --rm -v "$(pwd):/app" -w /app eclipse-temurin:25.0.4.1_1-jdk-alpine \
   sh -c 'apk add --no-cache gcompat && ./gradlew checkstyleMain checkstyleTest --continue --no-daemon'
 ```
+
+## Formatting
+
+Formats the code in place with google-java-format. Generated code excluded as only `src/` is formatted. CI runs it with `--dry-run --set-exit-if-changed` instead of `--replace`, which only lists the files that need formatting. **Non-blocking**: informative only, never fails the CI.
+
+```bash
+docker run --rm -v "$(pwd):/app" -w /app eclipse-temurin:25.0.4.1_1-jdk-alpine \
+  sh -c 'wget -qO /tmp/google-java-format.jar https://github.com/google/google-java-format/releases/download/v1.37.0/google-java-format-1.37.0-all-deps.jar \
+    && java --add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED \
+      --add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED \
+      --add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED \
+      --add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED \
+      --add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED \
+      --add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED \
+      -jar /tmp/google-java-format.jar --replace $(find src -name "*.java")'
+```

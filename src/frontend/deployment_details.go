@@ -4,10 +4,7 @@ import "os"
 
 var deploymentDetailsMap map[string]string
 
-// loadDeploymentDetails populates the pod hostname shown in the footer.
-// Cluster/zone used to come from the GCP metadata server; there's no
-// equivalent lookup for this project's stack, so only the hostname (portable
-// across any Kubernetes distribution) remains.
+// loadDeploymentDetails sets the pod hostname shown in the footer.
 func loadDeploymentDetails() {
 	deploymentDetailsMap = make(map[string]string)
 

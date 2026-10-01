@@ -19,7 +19,6 @@ FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 WORKDIR /app
-# restore dependencies
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .

@@ -18,8 +18,7 @@ const shutdownTimeout = 10 * time.Second
 
 // serveUntilSignal serves until SIGTERM (what Kubernetes sends to delete a pod)
 // or SIGINT, then reports NOT_SERVING to the probes, lets in-flight calls
-// finish and returns nil. Without it the process died on the spot, cutting
-// them.
+// finish and returns nil.
 func serveUntilSignal(srv *grpc.Server, lis net.Listener, healthcheck *health.Server) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
@@ -41,7 +40,7 @@ func serveUntilSignal(srv *grpc.Server, lis net.Listener, healthcheck *health.Se
 	return nil
 }
 
-// stopper is the part of *grpc.Server that gracefulStop uses.
+// stopper lets the tests replace *grpc.Server.
 type stopper interface {
 	GracefulStop()
 	Stop()

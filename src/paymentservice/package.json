@@ -7,14 +7,21 @@
   "scripts": {
     "test": "jest",
     "test:coverage": "jest --coverage",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "format": "prettier --write \"*.js\""
   },
   "author": "Jonathan Lui",
   "license": "ISC",
   "jest": {
     "reporters": [
       "default",
-      ["jest-junit", { "outputDirectory": "reports", "outputName": "junit.xml" }]
+      [
+        "jest-junit",
+        {
+          "outputDirectory": "reports",
+          "outputName": "junit.xml"
+        }
+      ]
     ],
     "collectCoverageFrom": [
       "*.js",
@@ -34,7 +41,8 @@
     "globals": "^17.12.0",
     "jest": "^30.5.2",
     "jest-junit": "^17.0.0",
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "prettier": "^3.9.9"
   },
   "allowScripts": {
     "@parcel/watcher": false,

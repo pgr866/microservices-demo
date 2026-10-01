@@ -99,9 +99,8 @@ func (fe *frontendServer) homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// loadPlatformDetails sets the platform badge from ENV_PLATFORM, once at
-// startup: setting it on every request, as before, made concurrent requests
-// write the same global variable at the same time.
+// loadPlatformDetails sets the platform badge from ENV_PLATFORM. It runs once
+// at startup, so requests only ever read plat.
 func loadPlatformDetails(env string) {
 	env = strings.ToLower(env)
 	if !stringinSlice(validEnvs, env) {
@@ -465,18 +464,17 @@ func (fe *frontendServer) chooseAd(ctx context.Context, ctxKeys []string, log lo
 		log.WithField("error", err).Warn("failed to retrieve ads")
 		return nil
 	}
-	// rand.Intn panics with 0, which took down the whole page.
+	// rand.Intn panics with 0.
 	if len(ads) == 0 {
 		return nil
 	}
 	return ads[rand.Intn(len(ads))]
 }
 
-// renderHTTPError renders the error page. If err comes from a failed gRPC call,
-// its code decides the HTTP status instead of the handler's default one. The
-// page only shows the reason for a client error (e.g. an expired card): for a
-// server error the details stay in the log, found by the request ID shown on
-// the page, so no internal error chain or address reaches the browser.
+// renderHTTPError renders the error page, with the HTTP status of the gRPC code
+// if err comes from a failed call. Only a client error shows its reason (e.g.
+// an expired card): a server error shows the request ID, and its details stay
+// in the log, so nothing internal reaches the browser.
 func renderHTTPError(log logrus.FieldLogger, r *http.Request, w http.ResponseWriter, err error, code int) {
 	st, fromGRPC := grpcStatus(err)
 	if fromGRPC {
@@ -593,7 +591,6 @@ func cartIDs(c []*pb.CartItem) []string {
 	return out
 }
 
-// get total # of items in cart
 func cartSize(c []*pb.CartItem) int {
 	cartSize := 0
 	for _, item := range c {

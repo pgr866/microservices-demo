@@ -35,17 +35,14 @@ public class AdServiceClient {
   private final ManagedChannel channel;
   private final hipstershop.AdServiceGrpc.AdServiceBlockingStub blockingStub;
 
-  /** Construct client connecting to Ad Service at {@code host:port}. */
   private AdServiceClient(String host, int port) {
     this(
         ManagedChannelBuilder.forAddress(host, port)
-            // Channels are secure by default (via SSL/TLS). For the example we disable TLS to avoid
-            // needing certificates.
+            // Plaintext, like every call between the services of this project.
             .usePlaintext()
             .build());
   }
 
-  /** Construct client for accessing RouteGuide server using the existing channel. */
   private AdServiceClient(ManagedChannel channel) {
     this.channel = channel;
     blockingStub = hipstershop.AdServiceGrpc.newBlockingStub(channel);
@@ -55,7 +52,6 @@ public class AdServiceClient {
     channel.shutdown().awaitTermination(5, TimeUnit.SECONDS);
   }
 
-  /** Get Ads from Server. */
   public void getAds(String contextKey) {
     logger.info("Get Ads with context " + contextKey + " ...");
     AdRequest request = AdRequest.newBuilder().addContextKeys(contextKey).build();
@@ -66,7 +62,7 @@ public class AdServiceClient {
     } catch (StatusRuntimeException e) {
       logger.log(Level.WARN, "RPC failed: " + e.getStatus());
       return;
-    } 
+    }
     for (Ad ads : response.getAdsList()) {
       logger.info("Ads: " + ads.getText());
     }
@@ -84,8 +80,7 @@ public class AdServiceClient {
     return portNumber;
   }
 
-  private static String getStringOrDefaultFromArgs(
-      String[] args, int index, String defaultString) {
+  private static String getStringOrDefaultFromArgs(String[] args, int index, String defaultString) {
     String s = defaultString;
     if (index < args.length) {
       s = args[index];
@@ -93,12 +88,8 @@ public class AdServiceClient {
     return s;
   }
 
-  /**
-   * Ads Service Client main. If provided, the first element of {@code args} is the context key to
-   * get the ads from the Ads Service
-   */
+  /** Arguments, all optional: context key (camera), host (localhost) and port (9555). */
   public static void main(String[] args) throws InterruptedException {
-    // Add final keyword to pass checkStyle.
     final String contextKeys = getStringOrDefaultFromArgs(args, 0, "camera");
     final String host = getStringOrDefaultFromArgs(args, 1, "localhost");
     final int serverPort = getPortOrDefaultFromArgs(args);

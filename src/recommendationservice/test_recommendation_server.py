@@ -73,12 +73,15 @@ def test_list_recommendations_passes_the_incoming_deadline_to_the_catalog():
     assert service.product_catalog_stub.ListProducts.call_args.kwargs["timeout"] == 2.5
 
 
-@pytest.mark.parametrize(("catalog_code", "expected_code"), [
-    (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.UNAVAILABLE),
-    (grpc.StatusCode.DEADLINE_EXCEEDED, grpc.StatusCode.UNAVAILABLE),
-    (grpc.StatusCode.INTERNAL, grpc.StatusCode.INTERNAL),
-    (grpc.StatusCode.UNKNOWN, grpc.StatusCode.INTERNAL),
-])
+@pytest.mark.parametrize(
+    ("catalog_code", "expected_code"),
+    [
+        (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.UNAVAILABLE),
+        (grpc.StatusCode.DEADLINE_EXCEEDED, grpc.StatusCode.UNAVAILABLE),
+        (grpc.StatusCode.INTERNAL, grpc.StatusCode.INTERNAL),
+        (grpc.StatusCode.UNKNOWN, grpc.StatusCode.INTERNAL),
+    ],
+)
 def test_list_recommendations_translates_catalog_errors(catalog_code, expected_code):
     stub = mock.Mock()
     stub.ListProducts.side_effect = CatalogError(catalog_code)
@@ -87,9 +90,13 @@ def test_list_recommendations_translates_catalog_errors(catalog_code, expected_c
     context.abort.side_effect = RuntimeError("aborted")
 
     with pytest.raises(RuntimeError):
-        RecommendationService(stub).ListRecommendations(demo_pb2.ListRecommendationsRequest(), context)
+        RecommendationService(stub).ListRecommendations(
+            demo_pb2.ListRecommendationsRequest(), context
+        )
 
-    context.abort.assert_called_once_with(expected_code, "failed to list products: catalog failed")
+    context.abort.assert_called_once_with(
+        expected_code, "failed to list products: catalog failed"
+    )
 
 
 def test_check_reports_serving():
@@ -100,7 +107,9 @@ def test_check_reports_serving():
 def test_watch_aborts_as_unimplemented():
     context = mock.Mock()
     RecommendationService(None).Watch(health_pb2.HealthCheckRequest(), context)
-    context.abort.assert_called_once_with(grpc.StatusCode.UNIMPLEMENTED, 'Watch is not implemented')
+    context.abort.assert_called_once_with(
+        grpc.StatusCode.UNIMPLEMENTED, "Watch is not implemented"
+    )
 
 
 def test_start_fails_without_product_catalog_address(monkeypatch):
@@ -111,21 +120,23 @@ def test_start_fails_without_product_catalog_address(monkeypatch):
 
 
 def format_record(**extra):
-    record = logging.LogRecord('test', logging.WARNING, __file__, 1, 'hello', None, None)
+    record = logging.LogRecord(
+        "test", logging.WARNING, __file__, 1, "hello", None, None
+    )
     record.__dict__.update(extra)
-    formatter = CustomJsonFormatter('%(timestamp)s %(severity)s %(name)s %(message)s')
+    formatter = CustomJsonFormatter("%(timestamp)s %(severity)s %(name)s %(message)s")
     return json.loads(formatter.format(record))
 
 
 def test_logger_defaults_severity_and_timestamp():
     log = format_record()
-    assert log['severity'] == 'WARNING'
-    assert log['timestamp']
-    assert log['message'] == 'hello'
+    assert log["severity"] == "WARNING"
+    assert log["timestamp"]
+    assert log["message"] == "hello"
 
 
 def test_logger_uppercases_explicit_severity():
-    assert format_record(severity='error')['severity'] == 'ERROR'
+    assert format_record(severity="error")["severity"] == "ERROR"
 
 
 def test_stop_on_signals_stops_the_server_gracefully():
@@ -141,4 +152,7 @@ def test_stop_on_signals_stops_the_server_gracefully():
         for s, handler in previous.items():
             signal.signal(s, handler)
 
-    assert server.stop.call_args_list == [mock.call(recommendation_server.SHUTDOWN_GRACE_SECONDS)] * 2
+    assert (
+        server.stop.call_args_list
+        == [mock.call(recommendation_server.SHUTDOWN_GRACE_SECONDS)] * 2
+    )

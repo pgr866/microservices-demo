@@ -125,8 +125,7 @@ func main() {
 
 // serveUntilSignal serves until SIGTERM (what Kubernetes sends to delete a pod)
 // or SIGINT, then stops accepting connections, lets in-flight requests finish
-// (up to shutdownTimeout, then closes the rest) and returns nil. Without it
-// the process died on the spot, cutting them.
+// (up to shutdownTimeout, then closes the rest) and returns nil.
 func serveUntilSignal(srv *http.Server) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
@@ -153,17 +152,16 @@ func serveUntilSignal(srv *http.Server) error {
 	return nil
 }
 
-// newHandler wraps the router with the middleware every request goes through.
 func newHandler(svc *frontendServer, logger *logrus.Logger, requestTimeout time.Duration) http.Handler {
 	handler := newRouter(svc)
-	handler = withTimeout(handler, requestTimeout) // add a deadline to every request
+	handler = withTimeout(handler, requestTimeout)
 	// Rejects form posts sent by another site's page (CSRF), on top of the
 	// SameSite cookies. Requests without browser headers (curl, k6) still pass.
 	handler = http.NewCrossOriginProtection().Handler(handler)
 	handler = securityHeaders(handler)
 	handler = limitBody(handler)
-	handler = &logHandler{log: logger, next: handler} // add logging
-	handler = ensureSessionID(handler)                // add session ID
+	handler = &logHandler{log: logger, next: handler}
+	handler = ensureSessionID(handler)
 	return handler
 }
 
@@ -213,8 +211,8 @@ func noDirListing(next http.Handler) http.Handler {
 	})
 }
 
-// mustConnGRPC creates a client connection to the address set in envKey. The
-// connection is lazy: nothing is dialed until the first RPC.
+// mustConnGRPC connects lazily to the address in envKey: nothing is dialed
+// until the first RPC.
 func mustConnGRPC(envKey string) *grpc.ClientConn {
 	addr := os.Getenv(envKey)
 	if addr == "" {

@@ -25,11 +25,9 @@ import (
 	pb "github.com/GoogleCloudPlatform/microservices-demo/src/shippingservice/genproto"
 )
 
-// TestGetQuote is a basic check on the GetQuote RPC service.
 func TestGetQuote(t *testing.T) {
 	s := server{}
 
-	// A basic test case to test logic and protobuf interactions.
 	req := &pb.GetQuoteRequest{
 		Address: &pb.Address{
 			StreetAddress: "Muffin Man",
@@ -58,7 +56,6 @@ func TestGetQuote(t *testing.T) {
 	}
 }
 
-// TestGetQuoteEmptyCart verifies that an empty cart returns a zero quote.
 func TestGetQuoteEmptyCart(t *testing.T) {
 	s := server{}
 
@@ -81,11 +78,9 @@ func TestGetQuoteEmptyCart(t *testing.T) {
 	}
 }
 
-// TestShipOrder is a basic check on the ShipOrder RPC service.
 func TestShipOrder(t *testing.T) {
 	s := server{}
 
-	// A basic test case to test logic and protobuf interactions.
 	req := &pb.ShipOrderRequest{
 		Address: &pb.Address{
 			StreetAddress: "Muffin Man",
@@ -114,7 +109,6 @@ func TestShipOrder(t *testing.T) {
 	}
 }
 
-// TestTrackingIdFormat verifies the tracking ID matches the expected pattern.
 func TestTrackingIdFormat(t *testing.T) {
 	pattern := regexp.MustCompile(`^[A-Z]{2}-\d+-\d+$`)
 
@@ -126,7 +120,6 @@ func TestTrackingIdFormat(t *testing.T) {
 	}
 }
 
-// TestTrackingIdUniqueness checks that generated IDs are not all identical.
 func TestTrackingIdUniqueness(t *testing.T) {
 	seen := make(map[string]bool)
 	for i := 0; i < 50; i++ {
@@ -138,7 +131,6 @@ func TestTrackingIdUniqueness(t *testing.T) {
 	}
 }
 
-// TestCreateQuoteFromFloat verifies quote creation from float values.
 func TestCreateQuoteFromFloat(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -164,7 +156,6 @@ func TestCreateQuoteFromFloat(t *testing.T) {
 	}
 }
 
-// TestCreateQuoteFromCount verifies count-based quote generation.
 func TestCreateQuoteFromCount(t *testing.T) {
 	zeroQuote := CreateQuoteFromCount(0)
 	if zeroQuote.Dollars != 0 || zeroQuote.Cents != 0 {
@@ -177,7 +168,6 @@ func TestCreateQuoteFromCount(t *testing.T) {
 	}
 }
 
-// TestGetRandomLetterCode verifies the output is a valid uppercase letter.
 func TestGetRandomLetterCode(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		code := getRandomLetterCode()
@@ -187,7 +177,6 @@ func TestGetRandomLetterCode(t *testing.T) {
 	}
 }
 
-// TestGetRandomNumber verifies the output has the correct number of digits.
 func TestGetRandomNumber(t *testing.T) {
 	for _, digits := range []int{1, 3, 5, 7, 10} {
 		result := getRandomNumber(digits)
@@ -198,7 +187,6 @@ func TestGetRandomNumber(t *testing.T) {
 	}
 }
 
-// TestQuoteString verifies the string representation of a Quote.
 func TestQuoteString(t *testing.T) {
 	q := Quote{Dollars: 8, Cents: 99}
 	expected := "$8.99"

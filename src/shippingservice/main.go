@@ -74,17 +74,14 @@ func main() {
 	}
 }
 
-// server controls RPC service responses.
 type server struct {
 	pb.UnimplementedShippingServiceServer
 }
 
-// GetQuote produces a shipping quote (cost) in USD.
 func (s *server) GetQuote(ctx context.Context, in *pb.GetQuoteRequest) (*pb.GetQuoteResponse, error) {
 	log.Info("[GetQuote] received request")
 	defer log.Info("[GetQuote] completed request")
 
-	// 1. Generate a quote based on the total number of items to be shipped.
 	count := 0
 	for _, item := range in.GetItems() {
 		// Otherwise a negative quantity could cancel out the rest and make
@@ -96,7 +93,6 @@ func (s *server) GetQuote(ctx context.Context, in *pb.GetQuoteRequest) (*pb.GetQ
 	}
 	quote := CreateQuoteFromCount(count)
 
-	// 2. Generate a response.
 	return &pb.GetQuoteResponse{
 		CostUsd: &pb.Money{
 			CurrencyCode: "USD",
@@ -106,8 +102,7 @@ func (s *server) GetQuote(ctx context.Context, in *pb.GetQuoteRequest) (*pb.GetQ
 
 }
 
-// ShipOrder mocks that the requested items will be shipped.
-// It supplies a tracking ID for notional lookup of shipment delivery status.
+// ShipOrder ships nothing: it only returns a made-up tracking ID.
 func (s *server) ShipOrder(ctx context.Context, in *pb.ShipOrderRequest) (*pb.ShipOrderResponse, error) {
 	log.Info("[ShipOrder] received request")
 	defer log.Info("[ShipOrder] completed request")
@@ -116,11 +111,9 @@ func (s *server) ShipOrder(ctx context.Context, in *pb.ShipOrderRequest) (*pb.Sh
 	if in.GetAddress() == nil {
 		return nil, status.Error(codes.InvalidArgument, "address is required")
 	}
-	// 1. Create a Tracking ID
 	baseAddress := fmt.Sprintf("%s, %s, %s", in.GetAddress().GetStreetAddress(), in.GetAddress().GetCity(), in.GetAddress().GetState())
 	id := CreateTrackingId(baseAddress)
 
-	// 2. Generate a response.
 	return &pb.ShipOrderResponse{
 		TrackingId: id,
 	}, nil

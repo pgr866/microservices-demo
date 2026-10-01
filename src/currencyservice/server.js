@@ -19,10 +19,10 @@ const logger = pino({
   name: 'currencyservice-server',
   messageKey: 'message',
   formatters: {
-    level (logLevelString) {
-      return { severity: logLevelString }
-    }
-  }
+    level(logLevelString) {
+      return { severity: logLevelString };
+    },
+  },
 });
 
 const path = require('path');
@@ -30,64 +30,51 @@ const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
 
 const MAIN_PROTO_PATH = path.join(__dirname, './proto/demo.proto');
-const HEALTH_PROTO_PATH = path.join(__dirname, './proto/grpc/health/v1/health.proto');
+const HEALTH_PROTO_PATH = path.join(
+  __dirname,
+  './proto/grpc/health/v1/health.proto',
+);
 
 const PORT = process.env.PORT;
 
 const shopProto = _loadProto(MAIN_PROTO_PATH).hipstershop;
 const healthProto = _loadProto(HEALTH_PROTO_PATH).grpc.health.v1;
 
-/**
- * Helper function that loads a protobuf file.
- */
-function _loadProto (path) {
-  const packageDefinition = protoLoader.loadSync(
-    path,
-    {
-      keepCase: true,
-      longs: String,
-      enums: String,
-      defaults: true,
-      oneofs: true
-    }
-  );
+function _loadProto(path) {
+  const packageDefinition = protoLoader.loadSync(path, {
+    keepCase: true,
+    longs: String,
+    enums: String,
+    defaults: true,
+    oneofs: true,
+  });
   return grpc.loadPackageDefinition(packageDefinition);
 }
 
-/**
- * Helper function that gets currency data from a stored JSON file
- * Uses public data from European Central Bank
- */
-function _getCurrencyData (callback) {
+// Exchange rates against the euro, from European Central Bank public data.
+function _getCurrencyData(callback) {
   const data = require('./data/currency_conversion.json');
   callback(data);
 }
 
-/**
- * Helper function that handles decimal/fractional carrying
- */
-function _carry (amount) {
+// Moves the fraction of units into nanos, and whole units out of nanos.
+function _carry(amount) {
   const fractionSize = Math.pow(10, 9);
   amount.nanos += (amount.units % 1) * fractionSize;
-  amount.units = Math.floor(amount.units) + Math.floor(amount.nanos / fractionSize);
+  amount.units =
+    Math.floor(amount.units) + Math.floor(amount.nanos / fractionSize);
   amount.nanos = amount.nanos % fractionSize;
   return amount;
 }
 
-/**
- * Lists the supported currencies
- */
-function getSupportedCurrencies (call, callback) {
+function getSupportedCurrencies(call, callback) {
   logger.info('Getting supported currencies..\.');
   _getCurrencyData((data) => {
-    callback(null, {currency_codes: Object.keys(data)});
+    callback(null, { currency_codes: Object.keys(data) });
   });
 }
 
-/**
- * Converts between currencies
- */
-function convert (call, callback) {
+function convert(call, callback) {
   try {
     _getCurrencyData((data) => {
       const request = call.request;
@@ -95,8 +82,13 @@ function convert (call, callback) {
       // An unknown code would turn the amount into NaN, which is sent as 0.
       for (const code of [request.from?.currency_code, request.to_code]) {
         if (!Object.hasOwn(data, code ?? '')) {
-          logger.warn(`conversion request rejected: unsupported currency code "${code ?? ''}"`);
-          callback({ code: grpc.status.INVALID_ARGUMENT, message: `unsupported currency code "${code ?? ''}"` });
+          logger.warn(
+            `conversion request rejected: unsupported currency code "${code ?? ''}"`,
+          );
+          callback({
+            code: grpc.status.INVALID_ARGUMENT,
+            message: `unsupported currency code "${code ?? ''}"`,
+          });
           return;
         }
       }
@@ -105,7 +97,7 @@ function convert (call, callback) {
       const from = request.from;
       const euros = _carry({
         units: from.units / data[from.currency_code],
-        nanos: from.nanos / data[from.currency_code]
+        nanos: from.nanos / data[from.currency_code],
       });
 
       euros.nanos = Math.round(euros.nanos);
@@ -113,7 +105,7 @@ function convert (call, callback) {
       // Convert: EUR --> to_currency
       const result = _carry({
         units: euros.units * data[request.to_code],
-        nanos: euros.nanos * data[request.to_code]
+        nanos: euros.nanos * data[request.to_code],
       });
 
       result.units = Math.floor(result.units);
@@ -129,10 +121,7 @@ function convert (call, callback) {
   }
 }
 
-/**
- * Endpoint for health checks
- */
-function check (call, callback) {
+function check(call, callback) {
   callback(null, { status: 'SERVING' });
 }
 
@@ -144,7 +133,7 @@ const SHUTDOWN_TIMEOUT_MS = 10000;
  * Stops the server, letting in-flight calls finish but no longer than
  * timeoutMs: then it cuts the rest. Resolves once the server is stopped.
  */
-function gracefulShutdown (server, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
+function gracefulShutdown(server, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       logger.warn(`calls still in flight after ${timeoutMs} ms, cutting them`);
@@ -160,10 +149,10 @@ function gracefulShutdown (server, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
 
 /**
  * Stops the server gracefully on SIGTERM (what Kubernetes sends to delete a
- * pod) and SIGINT, then exits. As PID 1 in the container, Node used to ignore
- * SIGTERM, so the pod only died with the SIGKILL sent 30 s later.
+ * pod) and SIGINT, then exits. Node, as PID 1 in the container, would
+ * otherwise ignore SIGTERM until the SIGKILL sent 30 s later.
  */
-function stopOnSignals (server) {
+function stopOnSignals(server) {
   for (const signal of ['SIGTERM', 'SIGINT']) {
     process.once(signal, async () => {
       logger.info(`received ${signal}, shutting down`);
@@ -173,27 +162,33 @@ function stopOnSignals (server) {
   }
 }
 
-/**
- * Starts an RPC server that receives requests for the
- * CurrencyConverter service at the sample server port
- */
-function main () {
+function main() {
   logger.info(`Starting gRPC server on port ${PORT}...`);
   const server = new grpc.Server();
-  server.addService(shopProto.CurrencyService.service, {getSupportedCurrencies, convert});
-  server.addService(healthProto.Health.service, {check});
+  server.addService(shopProto.CurrencyService.service, {
+    getSupportedCurrencies,
+    convert,
+  });
+  server.addService(healthProto.Health.service, { check });
 
   server.bindAsync(
     `[::]:${PORT}`,
     grpc.ServerCredentials.createInsecure(),
-    function() {
+    function () {
       logger.info(`CurrencyService gRPC server started on port ${PORT}`);
     },
-   );
+  );
   stopOnSignals(server);
 }
 
-module.exports = { _carry, convert, getSupportedCurrencies, check, gracefulShutdown, stopOnSignals };
+module.exports = {
+  _carry,
+  convert,
+  getSupportedCurrencies,
+  check,
+  gracefulShutdown,
+  stopOnSignals,
+};
 
 if (require.main === module) {
   main();

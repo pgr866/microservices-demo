@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package validator checks the forms the shop receives. It used to rely on
-// github.com/go-playground/validator, a general-purpose library that pulled in
-// six more modules (golang.org/x/crypto among them, flagged by vulnerability
-// scanners) for the few rules these three forms need.
+// Package validator checks the forms the shop receives with the standard
+// library only: a general-purpose validation library pulled in six more
+// modules for these few rules.
 package validator
 
 import (
@@ -85,7 +84,6 @@ func (sc *SetCurrencyPayload) Validate() error {
 	return c.err()
 }
 
-// FieldError is a field that broke a rule.
 type FieldError struct {
 	Field string
 	Rule  string
@@ -179,7 +177,6 @@ func luhn(digits string) bool {
 	return sum%10 == 0
 }
 
-// ValidationErrorResponse returns the message for a failed validation.
 func ValidationErrorResponse(err error) error {
 	var validationErrs Errors
 	if !errors.As(err, &validationErrs) {

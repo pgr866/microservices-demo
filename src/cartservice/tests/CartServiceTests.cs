@@ -42,13 +42,11 @@ namespace cartservice.tests
         [Fact]
         public async Task GetItem_NoAddItemBefore_EmptyCartReturned()
         {
-            // Setup test server and client
             using var server = await _host.StartAsync(TestContext.Current.CancellationToken);
             var httpClient = server.GetTestClient();
 
             string userId = Guid.NewGuid().ToString();
 
-            // Create a GRPC communication channel between the client and the server
             var channel = GrpcChannel.ForAddress(httpClient.BaseAddress, new GrpcChannelOptions
             {
                 HttpClient = httpClient
@@ -71,13 +69,11 @@ namespace cartservice.tests
         [Fact]
         public async Task AddItem_ItemExists_Updated()
         {
-            // Setup test server and client
             using var server = await _host.StartAsync(TestContext.Current.CancellationToken);
             var httpClient = server.GetTestClient();
 
             string userId = Guid.NewGuid().ToString();
 
-            // Create a GRPC communication channel between the client and the server
             var channel = GrpcChannel.ForAddress(httpClient.BaseAddress, new GrpcChannelOptions
             {
                 HttpClient = httpClient
@@ -110,26 +106,22 @@ namespace cartservice.tests
             Assert.Single(cart.Items);
             Assert.Equal(2, cart.Items[0].Quantity);
 
-            // Cleanup
             await client.EmptyCartAsync(new EmptyCartRequest { UserId = userId }, cancellationToken: TestContext.Current.CancellationToken);
         }
 
         [Fact]
         public async Task AddItem_New_Inserted()
         {
-            // Setup test server and client
             using var server = await _host.StartAsync(TestContext.Current.CancellationToken);
             var httpClient = server.GetTestClient();
 
             string userId = Guid.NewGuid().ToString();
 
-            // Create a GRPC communication channel between the client and the server
             var channel = GrpcChannel.ForAddress(httpClient.BaseAddress, new GrpcChannelOptions
             {
                 HttpClient = httpClient
             });
 
-            // Create a proxy object to work with the server
             var client = new CartServiceClient(channel);
 
             var request = new AddItemRequest

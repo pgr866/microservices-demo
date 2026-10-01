@@ -35,16 +35,13 @@ namespace cartservice.cartstore
         // reach the cart again, and without an expiry it would take up memory forever.
         public static readonly TimeSpan CartLifetime = TimeSpan.FromHours(48);
 
-        // A prefix of its own: the previous store kept each cart under the bare
-        // user ID, in another format.
         private static string Key(string userId) => "cart:" + userId;
 
         public Task AddItemAsync(string userId, string productId, int quantity)
         {
             _logger.LogInformation("AddItem product_id={ProductId} quantity={Quantity}", productId, quantity);
-            // The storage adds the quantity in one atomic step: reading the cart,
-            // changing it and writing it back made concurrent additions to the
-            // same cart overwrite each other.
+            // One atomic step in the storage, so concurrent additions to the same
+            // cart all count.
             return Guard(() => _storage.IncrementAsync(Key(userId), productId, quantity, CartLifetime));
         }
 
