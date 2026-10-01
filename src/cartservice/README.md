@@ -66,3 +66,12 @@ Formats the code in place with `dotnet format`, the same tool the linter runs wi
 docker run --rm -v "$(pwd):/app" -w /app mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24 \
   sh -c 'apk add --no-cache gcompat && dotnet format'
 ```
+
+## Vulnerability scan
+
+Scans the production image built in [Build and run in production](#build-and-run-in-production) for vulnerabilities and secrets with Trivy. CI runs the same command on the image built for the PR: **non-blocking**, informative only. The CD pipeline runs it with `--severity CRITICAL --exit-code 1` on the image pushed to the registry: **blocking** for promotion to the hardened scenario (any critical finding stops it), informative only for the baseline one.
+
+```bash
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 \
+  image --scanners vuln,secret cartservice:prod
+```

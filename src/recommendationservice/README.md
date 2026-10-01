@@ -64,3 +64,12 @@ Formats the code in place with `ruff format`. `demo_pb2*.py` excluded as it's ge
 docker run --rm -v "$(pwd):/app" -w /app python:3.14.7-alpine \
   sh -c 'pip install -r requirements-test.in && ruff format . --exclude demo_pb2.py,demo_pb2_grpc.py'
 ```
+
+## Vulnerability scan
+
+Scans the production image built in [Build and run in production](#build-and-run-in-production) for vulnerabilities and secrets with Trivy. CI runs the same command on the image built for the PR: **non-blocking**, informative only. The CD pipeline runs it with `--severity CRITICAL --exit-code 1` on the image pushed to the registry: **blocking** for promotion to the hardened scenario (any critical finding stops it), informative only for the baseline one.
+
+```bash
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 \
+  image --scanners vuln,secret recommendationservice:prod
+```
