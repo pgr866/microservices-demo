@@ -69,7 +69,7 @@ function _carry(amount) {
 }
 
 function getSupportedCurrencies(call, callback) {
-  logger.debug('Getting supported currencies..\.');
+  logger.debug('Getting supported currencies...');
   _getCurrencyData((data) => {
     callback(null, { currency_codes: Object.keys(data) });
   });
@@ -191,6 +191,6 @@ module.exports = {
   stopOnSignals,
 };
 
-if (require.main === module) {
+if (!!(require.main === module)) {
   main();
 }

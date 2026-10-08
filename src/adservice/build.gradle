@@ -9,21 +9,17 @@ repositories {
     mavenCentral()
 }
 
-description = 'Ad Service'
-group = "adservice"
-version = "0.1.0-SNAPSHOT"
-
 def javaVersion = 25
 def grpcVersion = "1.84.0"
 // gRPC 1.84.0 (its latest) still brings Netty 4.2.16, with CVE-2026-75595 and
 // CVE-2026-59903/75596: the BOM raises every Netty module to the fixed version.
-def nettyVersion = "4.2.18.Final"
+def nettyVersion = "4.2.19.Final"
 def protocVersion = "4.36.2"
-def guavaVersion = "33.7.1-jre"
+def guavaVersion = "33.7.2-jre"
 def log4jVersion = "2.26.1"
 def junitVersion = "6.1.3"
 def jacocoVersion = "0.8.15"
-def checkstyleVersion = "14.1.0"
+def checkstyleVersion = "14.3.0"
 
 application {
     mainClass = 'hipstershop.AdService'

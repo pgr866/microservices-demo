@@ -9,7 +9,7 @@ from grpc_health.v1 import health_pb2
 
 import demo_pb2
 import email_server
-from email_server import DummyEmailService, template
+from email_server import DummyEmailService
 from logger import CustomJsonFormatter, getJSONLogger
 
 
@@ -33,37 +33,6 @@ def build_order(items):
         ),
         items=items,
     )
-
-
-def test_renders_order_and_shipping_details():
-    order = build_order([make_item("OLJCESPC7Z", 2, 19, 990000000)])
-    html = template.render(order=order)
-
-    assert "123" in html
-    assert "TRACK-1" in html
-    assert "1600 Amphitheatre Pkwy" in html
-    assert "Mountain View" in html
-
-
-def test_renders_item_quantity_and_price():
-    order = build_order([make_item("OLJCESPC7Z", 2, 19, 990000000)])
-    html = template.render(order=order)
-
-    assert "OLJCESPC7Z" in html
-    assert "19.99 USD" in html
-
-
-def test_renders_multiple_items():
-    order = build_order(
-        [
-            make_item("OLJCESPC7Z", 2, 19, 990000000),
-            make_item("66VCHSJNUP", 1, 18, 990000000),
-        ]
-    )
-    html = template.render(order=order)
-
-    assert "OLJCESPC7Z" in html
-    assert "66VCHSJNUP" in html
 
 
 def test_check_reports_serving():
@@ -117,23 +86,6 @@ def test_logger_level_comes_from_log_level(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "verbose")
     with pytest.raises(ValueError):
         getJSONLogger("test-invalid")
-
-
-def test_renders_shipping_cost():
-    html = template.render(order=build_order([]))
-    assert "5.99 USD" in html
-
-
-def test_pads_cents_to_two_digits():
-    order = build_order([make_item("OLJCESPC7Z", 1, 3, 50000000)])
-    assert "3.05 USD" in template.render(order=order)
-
-
-def test_escapes_html_in_order_fields():
-    order = build_order([make_item("<script>alert(1)</script>", 1, 1, 0)])
-    html = template.render(order=order)
-    assert "<script>" not in html
-    assert "&lt;script&gt;" in html
 
 
 def test_stop_on_signals_stops_the_server_gracefully():

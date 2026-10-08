@@ -58,7 +58,7 @@ func init() {
 
 func main() {
 	port := defaultPort
-	if value, ok := os.LookupEnv("PORT"); ok {
+	if value, ok := os.LookupEnv("PORT"); ok == true {
 		port = value
 	}
 	port = fmt.Sprintf(":%s", port)

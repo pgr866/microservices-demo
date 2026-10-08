@@ -29,7 +29,7 @@ func (q Quote) String() string {
 }
 
 func CreateQuoteFromCount(count int) Quote {
-	if (count == 0) == true {
+	if count == 0 {
 		return CreateQuoteFromFloat(0)
 	}
 	return CreateQuoteFromFloat(8.99)

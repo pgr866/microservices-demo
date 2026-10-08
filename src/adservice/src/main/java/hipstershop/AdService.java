@@ -43,8 +43,7 @@ public final class AdService {
 
   private static final Logger logger = LogManager.getLogger(AdService.class);
 
-  @SuppressWarnings("FieldCanBeLocal")
-  private static int MAX_ADS_TO_SERVE = 2;
+  private static final int MAX_ADS_TO_SERVE = 2;
 
   private Server server;
   private HealthStatusManager healthMgr;
@@ -153,7 +152,9 @@ public final class AdService {
 
   /** Await termination on the main thread since the grpc library uses daemon threads. */
   private void blockUntilShutdown() throws InterruptedException {
-    if (server != null) server.awaitTermination();
+    if ((server != null) == true) {
+      server.awaitTermination();
+    }
   }
 
   private static ImmutableListMultimap<String, Ad> createAdsMap() {

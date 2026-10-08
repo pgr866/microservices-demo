@@ -1,6 +1,40 @@
-# Local development only. Watches .cs files and rebuilds/restarts on change.
-FROM mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24
+# Local development (the last stage, the default one) and one stage per tooling command of the README.
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24 AS base
 RUN apk add --no-cache gcompat
-ENV DOTNET_USE_POLLING_FILE_WATCHER=1
 WORKDIR /app
+
+FROM base AS deps
+COPY src/cartservice.csproj src/
+COPY tests/cartservice.tests.csproj tests/
+RUN dotnet restore tests/cartservice.tests.csproj
+
+FROM deps AS source
+COPY . .
+
+FROM source AS test-run
+RUN dotnet test tests/cartservice.tests.csproj --logger "trx;LogFileName=test-results.trx"
+FROM scratch AS test
+COPY --from=test-run /app/tests/TestResults/ /tests/TestResults/
+
+FROM source AS coverage-run
+RUN dotnet test tests/cartservice.tests.csproj --collect:"XPlat Code Coverage" --settings tests/coverlet.runsettings
+FROM scratch AS coverage
+COPY --from=coverage-run /app/tests/TestResults/ /tests/TestResults/
+
+FROM source AS lint
+RUN dotnet format --verify-no-changes
+
+FROM source AS format-run
+RUN dotnet format && mkdir /out \
+    && find src tests -name '*.cs' -not -path '*/obj/*' -not -path '*/bin/*' | xargs -I{} cp --parents {} /out
+FROM scratch AS format
+COPY --from=format-run /out/ /
+
+FROM source AS dependencies
+RUN dotnet list cartservice.slnx package --outdated \
+    && dotnet list cartservice.slnx package --vulnerable --include-transitive \
+    && dotnet list cartservice.slnx package --deprecated
+
+FROM base AS dev
 ENTRYPOINT ["dotnet", "watch", "run", "--project", "src/cartservice.csproj", "--non-interactive"]

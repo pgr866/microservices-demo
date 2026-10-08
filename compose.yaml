@@ -6,6 +6,7 @@ services:
       dockerfile: Dockerfile.dev
     volumes:
       - ./src/productcatalogservice:/app
+      - productcatalogservice_cache:/cache
     ports:
       - "3550:3550"
     environment:
@@ -24,6 +25,7 @@ services:
       dockerfile: Dockerfile.dev
     volumes:
       - ./src/shippingservice:/app
+      - shippingservice_cache:/cache
     ports:
       - "50051:50051"
     environment:
@@ -99,6 +101,8 @@ services:
     volumes:
       - ./src/adservice:/app
       - adservice_gradle_home:/root/.gradle
+      - adservice_gradle_project:/app/.gradle
+      - adservice_build:/app/build
     ports:
       - "9555:9555"
     environment:
@@ -126,7 +130,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 10s
+      start_period: 40s
 
   cartservice:
     build:
@@ -135,6 +139,8 @@ services:
     volumes:
       - ./src/cartservice:/app
       - cartservice_nuget_packages:/root/.nuget/packages
+      - cartservice_obj:/app/src/obj
+      - cartservice_bin:/app/src/bin
     ports:
       - "7070:7070"
     environment:
@@ -145,8 +151,8 @@ services:
       test: ["CMD", "nc", "-z", "localhost", "7070"]
       interval: 5s
       timeout: 3s
-      retries: 15
-      start_period: 60s
+      retries: 20
+      start_period: 90s
     depends_on:
       redis-cart:
         condition: service_healthy
@@ -179,6 +185,7 @@ services:
       dockerfile: Dockerfile.dev
     volumes:
       - ./src/checkoutservice:/app
+      - checkoutservice_cache:/cache
     ports:
       - "5050:5050"
     environment:
@@ -216,6 +223,7 @@ services:
       dockerfile: Dockerfile.dev
     volumes:
       - ./src/frontend:/app
+      - frontend_cache:/cache
     ports:
       - "8082:8082"
     environment:
@@ -251,7 +259,15 @@ services:
         condition: service_healthy
 
 volumes:
+  productcatalogservice_cache:
+  shippingservice_cache:
+  checkoutservice_cache:
+  frontend_cache:
   paymentservice_node_modules:
   currencyservice_node_modules:
   adservice_gradle_home:
+  adservice_gradle_project:
+  adservice_build:
   cartservice_nuget_packages:
+  cartservice_obj:
+  cartservice_bin:

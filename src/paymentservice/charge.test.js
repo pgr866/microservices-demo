@@ -53,9 +53,9 @@ describe('charge', () => {
     ).toThrow(/cannot process/);
   });
 
-  it('rejects an expired card', () => {
+  it('rejects an expired card, naming its last four digits and expiry date', () => {
     expect(() => charge(buildRequest('4111111111111111', pastYear, 1))).toThrow(
-      /expired/,
+      `Your credit card (ending 1111) expired on 1/${pastYear}`,
     );
   });
 
@@ -87,6 +87,21 @@ describe('charge', () => {
       amount: { currency_code: 'USD', units: '0', nanos: 500000000 },
     };
     expect(charge(request).transaction_id).toBeDefined();
+  });
+
+  it('logs the charged amount in cents, zero-padded', () => {
+    const info = jest.spyOn(charge.logger, 'info').mockImplementation(() => {});
+    try {
+      charge({
+        ...buildRequest('4111111111111111', futureYear, 1),
+        amount: { currency_code: 'USD', units: '3', nanos: 50000000 },
+      });
+      expect(info).toHaveBeenCalledWith(
+        'Transaction processed: visa ending 1111, amount USD 3.05',
+      );
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it('rejects a request without a card', () => {

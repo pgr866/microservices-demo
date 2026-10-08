@@ -34,7 +34,7 @@ namespace cartservice.cartstore
         public async Task<IReadOnlyList<KeyValuePair<string, long>>> GetAllAsync(string key)
         {
             var entries = await (await DatabaseAsync()).HashGetAllAsync(key);
-            return entries.Select(entry => KeyValuePair.Create(entry.Name.ToString(), (long)entry.Value)).ToList();
+            return [.. entries.Select(entry => KeyValuePair.Create(entry.Name.ToString(), (long)entry.Value))];
         }
 
         public async Task DeleteAsync(string key)

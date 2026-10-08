@@ -23,7 +23,7 @@ namespace cartservice.services
 {
     public class CartService : Hipstershop.CartService.CartServiceBase
     {
-        private readonly static Empty Empty = new Empty();
+        private readonly static Empty Empty = new();
         private readonly ICartStore _cartStore;
 
         public CartService(ICartStore cartStore)
@@ -56,7 +56,7 @@ namespace cartservice.services
 
         public async override Task<Empty> EmptyCart(EmptyCartRequest request, ServerCallContext context)
         {
-            RequireUserId (request.UserId);
+            RequireUserId(request.UserId)     ;
             await _cartStore.EmptyCartAsync(request.UserId);
             return Empty;
         }

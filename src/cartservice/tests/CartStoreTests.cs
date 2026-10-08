@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using cartservice.cartstore;
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -12,12 +13,22 @@ namespace cartservice.tests
     public class CartStoreTests
     {
         private static CartStore NewStore(ICartStorage storage = null) =>
-            new CartStore(storage ?? new InMemoryCartStorage(NullLogger<InMemoryCartStorage>.Instance), NullLogger<CartStore>.Instance);
+            new(storage ?? new InMemoryCartStorage(NullLogger<InMemoryCartStorage>.Instance), NullLogger<CartStore>.Instance);
+
+        /// <summary>Keeps every message logged, with every level enabled (like LOG_LEVEL=debug).</summary>
+        private sealed class RecordingLogger<T> : ILogger<T>
+        {
+            public List<(LogLevel Level, string Message)> Entries { get; } = [];
+            public IDisposable BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter) =>
+                Entries.Add((logLevel, formatter(state, exception)));
+        }
 
         /// <summary>A storage that is unreachable, like a Redis that went down.</summary>
         private class FailingStorage : ICartStorage
         {
-            private static Exception Down() => new InvalidOperationException("storage down");
+            private static InvalidOperationException Down() => new("storage down");
 
             public Task IncrementAsync(string key, string field, long quantity, TimeSpan expiry) => throw Down();
             public Task<IReadOnlyList<KeyValuePair<string, long>>> GetAllAsync(string key) => throw Down();
@@ -49,6 +60,25 @@ namespace cartservice.tests
         }
 
         [Fact]
+        public async Task Operations_LogAtDebugWithoutTheUserId()
+        {
+            // The user ID is the session ID and the cart's key: it must stay out of the logs.
+            var logger = new RecordingLogger<CartStore>();
+            var store = new CartStore(new InMemoryCartStorage(NullLogger<InMemoryCartStorage>.Instance), logger);
+
+            await store.AddItemAsync("session-1234", "product-a", 2);
+            await store.GetCartAsync("session-1234");
+            await store.EmptyCartAsync("session-1234");
+
+            Assert.Contains((LogLevel.Debug, "AddItem product_id=product-a quantity=2"), logger.Entries);
+            Assert.All(logger.Entries, entry =>
+            {
+                Assert.Equal(LogLevel.Debug, entry.Level);
+                Assert.DoesNotContain("session-1234", entry.Message);
+            });
+        }
+
+        [Fact]
         public async Task AddItem_AfterEmptyCart_StartsFromScratch()
         {
             var store = NewStore();
@@ -58,8 +88,7 @@ namespace cartservice.tests
             await store.AddItemAsync("user", "product-a", 1);
 
             var cart = await store.GetCartAsync("user");
-            Assert.Single(cart.Items);
-            Assert.Equal(1, cart.Items[0].Quantity);
+            Assert.Equal(1, Assert.Single(cart.Items).Quantity);
         }
 
         [Fact]
@@ -133,7 +162,7 @@ namespace cartservice.tests
             var get = await Assert.ThrowsAsync<RpcException>(() => store.GetCartAsync("user"));
             var empty = await Assert.ThrowsAsync<RpcException>(() => store.EmptyCartAsync("user"));
 
-            Assert.All(new[] { add, get, empty }, ex =>
+            Assert.All([add, get, empty], ex =>
             {
                 Assert.Equal(StatusCode.Unavailable, ex.StatusCode);
                 Assert.Equal("Can't access cart storage.", ex.Status.Detail);

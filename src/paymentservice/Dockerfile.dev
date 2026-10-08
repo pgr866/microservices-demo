@@ -1,6 +1,46 @@
-# Local development only. Watches .js files and restarts on change.
-FROM node:24.21.0-alpine
+# Local development (the last stage, the default one) and one stage per tooling command of the README.
+
+FROM node:24.21.0-alpine AS base
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
-ENTRYPOINT ["npx", "nodemon", "index.js"]
+
+FROM base AS source
+COPY . .
+
+FROM source AS test-run
+RUN npm test
+FROM scratch AS test
+COPY --from=test-run /app/reports/ /reports/
+
+FROM source AS coverage-run
+RUN npm run test:coverage
+FROM scratch AS coverage
+COPY --from=coverage-run /app/coverage/ /coverage/
+
+FROM source AS lint
+RUN npm run lint
+
+FROM source AS format-run
+RUN npm run format && mkdir /out && cp *.js /out
+FROM scratch AS format
+COPY --from=format-run /out/ /
+
+FROM source AS format-check
+RUN npx prettier --check "*.js"
+
+FROM source AS dependencies-run
+RUN npm outdated; npm audit; npm install
+FROM scratch AS dependencies
+COPY --from=dependencies-run /app/package-lock.json /
+
+FROM base AS codegen-run
+WORKDIR /repo/src/app
+COPY --from=protos . /repo/protos
+COPY . .
+RUN sh genproto.sh
+FROM scratch AS codegen
+COPY --from=codegen-run /repo/src/app/proto/ /proto/
+
+FROM base AS dev
+ENTRYPOINT ["node", "--watch", "index.js"]

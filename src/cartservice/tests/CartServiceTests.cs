@@ -103,8 +103,7 @@ namespace cartservice.tests
             var cart = await client.GetCartAsync(getCartRequest, cancellationToken: TestContext.Current.CancellationToken);
             Assert.NotNull(cart);
             Assert.Equal(userId, cart.UserId);
-            Assert.Single(cart.Items);
-            Assert.Equal(2, cart.Items[0].Quantity);
+            Assert.Equal(2, Assert.Single(cart.Items).Quantity);
 
             await client.EmptyCartAsync(new EmptyCartRequest { UserId = userId }, cancellationToken: TestContext.Current.CancellationToken);
         }

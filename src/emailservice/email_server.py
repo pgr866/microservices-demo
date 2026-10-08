@@ -20,18 +20,12 @@ from concurrent import futures
 
 import grpc
 from grpc_health.v1 import health_pb2, health_pb2_grpc
-from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 import demo_pb2
 import demo_pb2_grpc
 from logger import getJSONLogger
 
 logger = getJSONLogger("emailservice-server")
-
-env = Environment(
-    loader=FileSystemLoader("templates"), autoescape=select_autoescape(["html", "xml"])
-)
-template = env.get_template("confirmation.html")
 
 
 class BaseEmailService(demo_pb2_grpc.EmailServiceServicer):
@@ -90,5 +84,5 @@ def start():
 
 
 if __name__ == "__main__":
-    logger.info(f"starting the email service in dummy mode.")
+    logger.info("starting the email service in dummy mode.")
     start()

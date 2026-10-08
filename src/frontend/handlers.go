@@ -19,10 +19,12 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"maps"
 	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -87,7 +89,7 @@ func (fe *frontendServer) homeHandler(w http.ResponseWriter, r *http.Request) {
 		ps[i] = productView{p, price}
 	}
 
-	if err := templates.ExecuteTemplate(w, "home", injectCommonTemplateData(r, map[string]interface{}{
+	if err := templates.ExecuteTemplate(w, "home", injectCommonTemplateData(r, map[string]any{
 		"show_currency": true,
 		"currencies":    currencies,
 		"products":      ps,
@@ -103,7 +105,7 @@ func (fe *frontendServer) homeHandler(w http.ResponseWriter, r *http.Request) {
 // at startup, so requests only ever read plat.
 func loadPlatformDetails(env string) {
 	env = strings.ToLower(env)
-	if !stringinSlice(validEnvs, env) {
+	if !slices.Contains(validEnvs, env) {
 		log.Infof("ENV_PLATFORM %q is empty or invalid, using \"local\"", env)
 		env = "local"
 	}
@@ -173,7 +175,7 @@ func (fe *frontendServer) productHandler(w http.ResponseWriter, r *http.Request)
 		Price *pb.Money
 	}{p, price}
 
-	if err := templates.ExecuteTemplate(w, "product", injectCommonTemplateData(r, map[string]interface{}{
+	if err := templates.ExecuteTemplate(w, "product", injectCommonTemplateData(r, map[string]any{
 		"ad":              fe.chooseAd(r.Context(), p.Categories, log),
 		"show_currency":   true,
 		"currencies":      currencies,
@@ -290,7 +292,7 @@ func (fe *frontendServer) viewCartHandler(w http.ResponseWriter, r *http.Request
 	}
 	year := time.Now().Year()
 
-	if err := templates.ExecuteTemplate(w, "cart", injectCommonTemplateData(r, map[string]interface{}{
+	if err := templates.ExecuteTemplate(w, "cart", injectCommonTemplateData(r, map[string]any{
 		"currencies":       currencies,
 		"recommendations":  recommendations,
 		"cart_size":        cartSize(cart),
@@ -374,7 +376,7 @@ func (fe *frontendServer) placeOrderHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := templates.ExecuteTemplate(w, "order", injectCommonTemplateData(r, map[string]interface{}{
+	if err := templates.ExecuteTemplate(w, "order", injectCommonTemplateData(r, map[string]any{
 		"show_currency":   false,
 		"currencies":      currencies,
 		"order":           order.GetOrder(),
@@ -495,7 +497,7 @@ func renderHTTPError(log logrus.FieldLogger, r *http.Request, w http.ResponseWri
 
 	w.WriteHeader(code)
 
-	if templateErr := templates.ExecuteTemplate(w, "error", injectCommonTemplateData(r, map[string]interface{}{
+	if templateErr := templates.ExecuteTemplate(w, "error", injectCommonTemplateData(r, map[string]any{
 		"error":       message,
 		"status_code": code,
 		"status":      http.StatusText(code),
@@ -546,8 +548,8 @@ func httpStatusFromCode(c codes.Code) int {
 	}
 }
 
-func injectCommonTemplateData(r *http.Request, payload map[string]interface{}) map[string]interface{} {
-	data := map[string]interface{}{
+func injectCommonTemplateData(r *http.Request, payload map[string]any) map[string]any {
+	data := map[string]any{
 		"session_id":        sessionID(r),
 		"request_id":        r.Context().Value(ctxKeyRequestID{}),
 		"user_currency":     currentCurrency(r),
@@ -560,9 +562,7 @@ func injectCommonTemplateData(r *http.Request, payload map[string]interface{}) m
 		"baseUrl":           baseUrl,
 	}
 
-	for k, v := range payload {
-		data[k] = v
-	}
+	maps.Copy(data, payload)
 
 	return data
 }
@@ -619,13 +619,4 @@ func renderCurrencyLogo(currencyCode string) string {
 		logo = val
 	}
 	return logo
-}
-
-func stringinSlice(slice []string, val string) bool {
-	for _, item := range slice {
-		if item == val {
-			return true
-		}
-	}
-	return false
 }

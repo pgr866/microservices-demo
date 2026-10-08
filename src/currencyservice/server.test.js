@@ -109,6 +109,16 @@ describe('convert with invalid input', () => {
       message: `unsupported currency code "${code}"`,
     });
   });
+
+  it('responds INTERNAL to an unexpected error instead of throwing', () => {
+    const callback = jest.fn();
+    // Without a request, reading its fields throws a TypeError.
+    convert({}, callback);
+
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({ code: status.INTERNAL }),
+    );
+  });
 });
 
 describe('getSupportedCurrencies', () => {

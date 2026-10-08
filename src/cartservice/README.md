@@ -6,6 +6,8 @@ The Cart service stores the items in a user's shopping cart in Redis (falling ba
 
 Also starts `redis-cart`, the same Redis it uses in the cluster.
 
+The commands of the following sections are stages of `Dockerfile.dev`, run from this folder.
+
 ```bash
 docker compose up cartservice
 ```
@@ -33,47 +35,55 @@ docker run --rm --network host -v "$(pwd)/protos:/protos" -w /protos fullstoryde
 
 ## Configuration
 
-- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`. Per-request logs are `debug`, so the default only shows startup, shutdown, warnings and errors; `compose.yaml` sets `debug` for development.
+- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`; per-request logs are `debug`, and `compose.yaml` sets `debug` for development.
 
 ## Testing
 
 Use `dorny/test-reporter` action (`dotnet-trx`, reading `tests/TestResults/test-results.trx`). **Blocking**: the CI fails if any test fails.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24 \
-  sh -c 'apk add --no-cache gcompat && dotnet test tests/cartservice.tests.csproj --logger "trx;LogFileName=test-results.trx"'
+docker build -f Dockerfile.dev --target test --output type=local,dest=. .
 ```
 
 ## Coverage
 
-Use `irongut/CodeCoverageSummary` action (Cobertura XML, `tests/TestResults/*/coverage.cobertura.xml`). Protobuf/gRPC generated code (`obj/`) excluded via `tests/coverlet.runsettings` as it's generated code. **Blocking**: the CI fails if coverage drops below the configured threshold.
+Use `irongut/CodeCoverageSummary` action (Cobertura XML, `tests/TestResults/*/coverage.cobertura.xml`). **Blocking**: the CI fails if coverage drops below the configured threshold.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24 \
-  sh -c 'apk add --no-cache gcompat && dotnet test tests/cartservice.tests.csproj --collect:"XPlat Code Coverage" --settings tests/coverlet.runsettings'
+docker build -f Dockerfile.dev --target coverage --output type=local,dest=. .
 ```
 
 ## Linting
 
-Use `reviewdog/action-setup` + `reviewdog -f=dotnet` (`dotnet format` output piped in) to annotate the PR. Generated code excluded as `dotnet format` ignores `obj/` by default. **Non-blocking**: informative only, never fails the CI.
+Use `reviewdog/action-setup` + `reviewdog -f=dotnet` (`dotnet format` output piped in) to annotate the PR. **Non-blocking**: informative only, never fails the CI.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24 \
-  sh -c 'apk add --no-cache gcompat && dotnet format --verify-no-changes'
+docker build -f Dockerfile.dev --target lint .
 ```
 
 ## Formatting
 
-Formats the code in place with `dotnet format`, the same tool the linter runs with `--verify-no-changes`, so CI needs no extra step. It also fixes the deliberate linter finding.
+Formats the code in place with `dotnet format`, the same tool the linter runs with `--verify-no-changes`.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24 \
-  sh -c 'apk add --no-cache gcompat && dotnet format'
+docker build -f Dockerfile.dev --target format --output type=local,dest=. .
 ```
+
+## Dependencies
+
+Lists the NuGet packages that are outdated, vulnerable or deprecated; to update one, change its version in the `.csproj`.
+
+```bash
+docker build -f Dockerfile.dev --target dependencies .
+```
+
+## Generated code
+
+`src/protos/Cart.proto` is the cart part of `protos/demo.proto`, from which `Grpc.Tools` generates the C# code on every build. After changing the `.proto`, copy the change there by hand.
 
 ## Vulnerability scan
 
-Scans the production image built in [Build and run in production](#build-and-run-in-production) for vulnerabilities and secrets with Trivy. CI runs the same command on the image built for the PR: **non-blocking**, informative only. The CD pipeline runs it with `--severity CRITICAL --exit-code 1` on the image pushed to the registry: **blocking** for promotion to the hardened scenario (any critical finding stops it), informative only for the baseline one.
+Scans the production image built above for vulnerabilities and secrets with Trivy. CI runs it **non-blocking**; the CD pipeline runs it with `--severity CRITICAL --exit-code 1`, **blocking** the promotion to the hardened scenario.
 
 ```bash
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 \

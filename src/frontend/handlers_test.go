@@ -59,26 +59,6 @@ func TestSetPlatformDetails(t *testing.T) {
 	}
 }
 
-func TestStringinSlice(t *testing.T) {
-	tests := []struct {
-		name  string
-		slice []string
-		val   string
-		want  bool
-	}{
-		{"present", validEnvs, "azure", true},
-		{"absent", validEnvs, "not-a-real-env", false},
-		{"empty slice", []string{}, "azure", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := stringinSlice(tt.slice, tt.val); got != tt.want {
-				t.Errorf("stringinSlice(%v, %q) = %v, want %v", tt.slice, tt.val, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCartSize(t *testing.T) {
 	tests := []struct {
 		name string

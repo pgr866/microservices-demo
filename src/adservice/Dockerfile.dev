@@ -1,5 +1,64 @@
-# Local development only. Watches .java files and rebuilds/restarts on change.
-FROM eclipse-temurin:25.0.4.1_1-jdk-alpine
-RUN apk add --no-cache gcompat watchexec
+# Local development (the last stage, the default one) and one stage per tooling command of the README.
+
+FROM eclipse-temurin:25.0.4.1_1-jdk-alpine AS base
+RUN apk add --no-cache gcompat
 WORKDIR /app
+
+FROM base AS deps
+COPY build.gradle settings.gradle gradlew ./
+COPY gradle gradle
+COPY src/main/proto src/main/proto
+RUN ./gradlew downloadDependencies generateProto --no-daemon
+
+FROM deps AS source
+COPY . .
+
+FROM source AS test-run
+RUN ./gradlew test --no-daemon
+FROM scratch AS test
+COPY --from=test-run /app/build/test-results/test/ /build/test-results/test/
+
+FROM source AS coverage-run
+RUN ./gradlew jacocoTestReport --no-daemon
+FROM scratch AS coverage
+COPY --from=coverage-run /app/build/reports/jacoco/test/jacocoTestReport.xml /build/reports/jacoco/test/
+
+FROM source AS lint
+RUN ./gradlew checkstyleMain checkstyleTest --continue --no-daemon
+
+FROM source AS format-base
+ENV GJF="java --add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED \
+ --add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED \
+ --add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED \
+ --add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED \
+ --add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED \
+ --add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED \
+ -jar /opt/google-java-format.jar"
+ADD https://github.com/google/google-java-format/releases/download/v1.37.0/google-java-format-1.37.0-all-deps.jar /opt/google-java-format.jar
+
+FROM format-base AS format-run
+RUN $GJF --replace $(find src -name "*.java") && mkdir /out && find src -name '*.java' | xargs -I{} cp --parents {} /out
+FROM scratch AS format
+COPY --from=format-run /out/ /
+
+FROM format-base AS format-check
+RUN $GJF --dry-run --set-exit-if-changed $(find src -name "*.java")
+
+FROM source AS dependencies-run
+RUN ./gradlew dependencies --configuration runtimeClasspath --no-daemon \
+    && ./gradlew wrapper --gradle-version 9.8.0 --no-daemon && sed -i 's/\r$//' gradlew.bat
+FROM scratch AS dependencies
+COPY --from=dependencies-run /app/gradle/ /gradle/
+COPY --from=dependencies-run /app/gradlew /app/gradlew.bat /
+
+FROM base AS codegen-run
+WORKDIR /repo/src/app
+COPY --from=protos . /repo/protos
+COPY . .
+RUN sh genproto.sh
+FROM scratch AS codegen
+COPY --from=codegen-run /repo/src/app/src/main/proto/demo.proto /src/main/proto/
+
+FROM base AS dev
+RUN apk add --no-cache watchexec
 ENTRYPOINT ["watchexec", "--restart", "--poll", "2s", "--watch", "src", "--watch", "build.gradle", "--", "./gradlew", "run", "--no-daemon"]

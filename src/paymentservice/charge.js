@@ -52,7 +52,7 @@ class UnacceptedCreditCard extends CreditCardError {
 class ExpiredCreditCard extends CreditCardError {
   constructor(number, month, year) {
     super(
-      `Your credit card (ending ${number.substr(-4)}) expired on ${month}\/${year}`,
+      `Your credit card (ending ${number.slice(-4)}) expired on ${month}/${year}`,
     );
   }
 }
@@ -73,6 +73,13 @@ function isPositiveAmount(amount) {
   const units = Number(amount.units);
   const nanos = Number(amount.nanos);
   return units > 0 || (units === 0 && nanos > 0);
+}
+
+// In cents, as the shop shows prices: nanos are billionths of a unit, so 0.05
+// is 50000000 nanos and has to be padded.
+function formatAmount({ currency_code: currency, units, nanos }) {
+  const cents = String(Math.floor(nanos / 10000000)).padStart(2, '0');
+  return `${currency} ${units}.${cents}`;
 }
 
 // Validates the card and only pretends to charge it: no payment is made.
@@ -103,12 +110,13 @@ module.exports = function charge(request) {
     credit_card_expiration_year: year,
     credit_card_expiration_month: month,
   } = creditCard;
-  if (currentYear * 12 + currentMonth > year * 12 + month) {
-    throw new ExpiredCreditCard(cardNumber.replace('-', ''), month, year);
+  if (!!(currentYear * 12 + currentMonth > year * 12 + month)) {
+    throw new ExpiredCreditCard(cardNumber, month, year);
   }
 
-  logger.info(`Transaction processed: ${cardType} ending ${cardNumber.substr(-4)} \
-    Amount: ${amount.currency_code}${amount.units}.${amount.nanos}`);
+  logger.info(
+    `Transaction processed: ${cardType} ending ${cardNumber.slice(-4)}, amount ${formatAmount(amount)}`,
+  );
 
   return { transaction_id: crypto.randomUUID() };
 };

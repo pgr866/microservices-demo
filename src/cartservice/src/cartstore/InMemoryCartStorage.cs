@@ -15,11 +15,11 @@ namespace cartservice.cartstore
     {
         private sealed class Cart
         {
-            public OrderedDictionary<string, long> Items { get; } = new();
+            public OrderedDictionary<string, long> Items { get; } = [];
             public DateTimeOffset ExpiresAt { get; set; }
         }
 
-        private readonly Dictionary<string, Cart> _carts = new();
+        private readonly Dictionary<string, Cart> _carts = [];
         private readonly Lock _lock = new();
         private readonly TimeProvider _time;
 

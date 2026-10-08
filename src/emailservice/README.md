@@ -4,6 +4,8 @@ The Email service logs a request to send an order confirmation email. It current
 
 ## Development (hot reload, run from the repo root)
 
+The commands of the following sections are stages of `Dockerfile.dev`, run from this folder.
+
 ```bash
 docker compose up emailservice
 ```
@@ -27,47 +29,60 @@ docker run --rm --network host -v "$(pwd)/protos:/protos" -w /protos fullstoryde
 
 ## Configuration
 
-- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`. Per-request logs are `debug`, so the default only shows startup, shutdown, warnings and errors; `compose.yaml` sets `debug` for development.
+- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`; per-request logs are `debug`, and `compose.yaml` sets `debug` for development.
 
 ## Testing
 
 Use `dorny/test-reporter` action (`java-junit`, via `pytest --junitxml`). **Blocking**: the CI fails if any test fails.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app python:3.14.7-alpine \
-  sh -c 'pip install -r requirements.txt -r requirements-test.in && pytest --junitxml=reports/junit.xml'
+docker build -f Dockerfile.dev --target test --output type=local,dest=. .
 ```
 
 ## Coverage
 
-Use `irongut/CodeCoverageSummary` action (Cobertura XML, via `pytest-cov`). `demo_pb2*.py` excluded as it's generated code. **Blocking**: the CI fails if coverage drops below the configured threshold.
+Use `irongut/CodeCoverageSummary` action (Cobertura XML, via `pytest-cov`). **Blocking**: the CI fails if coverage drops below the configured threshold.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app python:3.14.7-alpine \
-  sh -c 'pip install -r requirements.txt -r requirements-test.in && pytest --cov=email_server --cov=logger --cov-report=term --cov-report=xml:reports/coverage.xml'
+docker build -f Dockerfile.dev --target coverage --output type=local,dest=. .
 ```
 
 ## Linting
 
-Use `astral-sh/ruff-action`, which runs the linter itself and annotates the PR natively (no separate report file needed). `demo_pb2*.py` excluded as it's generated code. **Non-blocking**: informative only, never fails the CI.
+Use `astral-sh/ruff-action`, which runs the linter itself and annotates the PR natively (no separate report file needed). **Non-blocking**: informative only, never fails the CI.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app python:3.14.7-alpine \
-  sh -c 'pip install -r requirements-test.in && ruff check . --exclude demo_pb2.py,demo_pb2_grpc.py'
+docker build -f Dockerfile.dev --target lint .
 ```
 
 ## Formatting
 
-Formats the code in place with `ruff format`. `demo_pb2*.py` excluded as it's generated code. CI runs it with `--check` instead, which only lists the files that need formatting. **Non-blocking**: informative only, never fails the CI.
+Formats the code in place with `ruff format`. **Non-blocking**: informative only, never fails the CI.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app python:3.14.7-alpine \
-  sh -c 'pip install -r requirements-test.in && ruff format . --exclude demo_pb2.py,demo_pb2_grpc.py'
+docker build -f Dockerfile.dev --target format --output type=local,dest=. .
+docker build -f Dockerfile.dev --target format-check .
+```
+
+## Dependencies
+
+Regenerates `requirements.txt` from `requirements.in` with the latest versions; the direct dependencies are pinned by hand in the `.in` files.
+
+```bash
+docker build -f Dockerfile.dev --target dependencies --output type=local,dest=. .
+```
+
+## Generated code
+
+`demo_pb2.py` and `demo_pb2_grpc.py` are generated from `protos/demo.proto` by `genproto.sh`. Regenerate them after changing the `.proto`:
+
+```bash
+docker build -f Dockerfile.dev --target codegen --build-context protos=../../protos --output type=local,dest=. .
 ```
 
 ## Vulnerability scan
 
-Scans the production image built in [Build and run in production](#build-and-run-in-production) for vulnerabilities and secrets with Trivy. CI runs the same command on the image built for the PR: **non-blocking**, informative only. The CD pipeline runs it with `--severity CRITICAL --exit-code 1` on the image pushed to the registry: **blocking** for promotion to the hardened scenario (any critical finding stops it), informative only for the baseline one.
+Scans the production image built above for vulnerabilities and secrets with Trivy. CI runs it **non-blocking**; the CD pipeline runs it with `--severity CRITICAL --exit-code 1`, **blocking** the promotion to the hardened scenario.
 
 ```bash
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 \

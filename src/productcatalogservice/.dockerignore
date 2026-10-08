@@ -1,7 +1,5 @@
-tmp/
-test-report.json
 coverage.out
-coverage.html
+test-report.json
 **/*_test.go
 Dockerfile*
 .dockerignore

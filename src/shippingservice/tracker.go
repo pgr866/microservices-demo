@@ -36,7 +36,7 @@ func getRandomLetterCode() uint32 {
 
 func getRandomNumber(digits int) string {
 	str := ""
-	for i := 0; i < digits; i++ {
+	for range digits {
 		str = fmt.Sprintf("%s%d", str, rand.Intn(10))
 	}
 

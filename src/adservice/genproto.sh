@@ -14,5 +14,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-mkdir -p proto && \
 cp ../../protos/demo.proto src/main/proto

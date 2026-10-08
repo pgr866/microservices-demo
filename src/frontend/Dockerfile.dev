@@ -1,5 +1,59 @@
-# Local development only. Watches .go files and rebuilds/restarts on change.
-FROM golang:1.27.1-alpine
-RUN go install github.com/air-verse/air@v1.67.4
+# Local development (the last stage, the default one) and one stage per tooling command of the README.
+
+FROM golang:1.27.1-alpine AS base
+ENV GOCACHE=/cache/go-build GOMODCACHE=/cache/go-mod
 WORKDIR /app
-ENTRYPOINT ["air"]
+
+FROM base AS deps
+COPY go.mod go.sum ./
+RUN go mod download
+
+FROM deps AS source
+COPY . .
+
+FROM source AS test-run
+RUN go test -json ./... > /test-report.json
+FROM scratch AS test
+COPY --from=test-run /test-report.json /
+
+FROM source AS coverage-run
+RUN go test -coverprofile=/coverage.out $(go list ./... | grep -v /genproto) && go tool cover -func=/coverage.out
+FROM scratch AS coverage
+COPY --from=coverage-run /coverage.out /
+
+FROM golangci/golangci-lint:v2.14.0-alpine AS lint
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN golangci-lint run ./...
+
+FROM source AS format-run
+RUN gofmt -l -w . && mkdir /out && find . -name '*.go' -not -path './genproto/*' | xargs -I{} cp --parents {} /out
+FROM scratch AS format
+COPY --from=format-run /out/ /
+
+FROM source AS format-check
+RUN files=$(gofmt -l .) && [ -z "$files" ] || { echo "$files"; exit 1; }
+
+FROM source AS dependencies-run
+RUN go get -u ./... && go mod tidy
+FROM scratch AS dependencies
+COPY --from=dependencies-run /app/go.mod /app/go.sum /
+
+FROM source AS vulncheck
+RUN go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+FROM base AS codegen-run
+WORKDIR /repo/src/app
+COPY --from=protos . /repo/protos
+COPY . .
+RUN apk add --no-cache protoc && go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12 \
+    && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2 && sh genproto.sh
+FROM scratch AS codegen
+COPY --from=codegen-run /repo/src/app/genproto/ /genproto/
+
+FROM base AS dev
+RUN go install github.com/air-verse/air@v1.67.4 \
+    && go clean -modcache
+ENTRYPOINT ["air", "-tmp_dir", "/tmp/air", "-build.cmd", "go build -o /tmp/air/main .", "-build.entrypoint", "/tmp/air/main"]

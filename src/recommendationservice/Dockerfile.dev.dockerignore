@@ -3,10 +3,6 @@ __pycache__/
 .ruff_cache/
 .coverage
 reports/
-test_*.py
 Dockerfile*
 .dockerignore
 README.md
-genproto.sh
-requirements.in
-requirements-test.in

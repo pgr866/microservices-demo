@@ -112,7 +112,7 @@ func TestShipOrder(t *testing.T) {
 func TestTrackingIdFormat(t *testing.T) {
 	pattern := regexp.MustCompile(`^[A-Z]{2}-\d+-\d+$`)
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		id := CreateTrackingId("test-salt-value")
 		if !pattern.MatchString(id) {
 			t.Errorf("CreateTrackingId: '%s' does not match expected pattern '[A-Z]{2}-\\d+-\\d+'", id)
@@ -122,7 +122,7 @@ func TestTrackingIdFormat(t *testing.T) {
 
 func TestTrackingIdUniqueness(t *testing.T) {
 	seen := make(map[string]bool)
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		id := CreateTrackingId("same-salt")
 		seen[id] = true
 	}
@@ -169,7 +169,7 @@ func TestCreateQuoteFromCount(t *testing.T) {
 }
 
 func TestGetRandomLetterCode(t *testing.T) {
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		code := getRandomLetterCode()
 		if code < 65 || code > 90 {
 			t.Errorf("getRandomLetterCode: got %d (%c), expected range 65-90 (A-Z)", code, code)

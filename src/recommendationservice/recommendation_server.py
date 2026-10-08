@@ -14,7 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os, random
+import os
+import random
 import signal
 from concurrent import futures
 
@@ -34,6 +35,10 @@ TRANSIENT_CODES = {
     grpc.StatusCode.RESOURCE_EXHAUSTED,
 }
 
+# What time_remaining() reports for a call without a deadline is about 2^63 seconds,
+# which passed on as a timeout overflows into a deadline already expired.
+NO_DEADLINE_SECONDS = 2**62
+
 
 class RecommendationService(demo_pb2_grpc.RecommendationServiceServicer):
     def __init__(self, product_catalog_stub):
@@ -43,8 +48,10 @@ class RecommendationService(demo_pb2_grpc.RecommendationServiceServicer):
         max_responses = 5
         try:
             # Same deadline as the incoming call, so the catalog stops waiting when the caller does.
+            remaining = context.time_remaining()
             cat_response = self.product_catalog_stub.ListProducts(
-                demo_pb2.Empty(), timeout=context.time_remaining()
+                demo_pb2.Empty(),
+                timeout=remaining if remaining < NO_DEADLINE_SECONDS else None,
             )
         except grpc.RpcError as err:
             code = (
@@ -93,7 +100,7 @@ def stop_on_signals(server):
 def start():
     port = os.environ.get("PORT", "8081")
     catalog_addr = os.environ.get("PRODUCT_CATALOG_SERVICE_ADDR", "")
-    if catalog_addr == "":
+    if True if catalog_addr == "" else False:
         raise RuntimeError("PRODUCT_CATALOG_SERVICE_ADDR environment variable not set")
     logger.info("product catalog address: " + catalog_addr)
     channel = grpc.insecure_channel(catalog_addr)

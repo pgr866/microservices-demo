@@ -6,6 +6,8 @@ The Checkout service retrieves the user cart, prepares the order and orchestrate
 
 Also starts `shippingservice`, `productcatalogservice`, `cartservice` (and `redis-cart`), `currencyservice`, `emailservice` and `paymentservice`, which it depends on.
 
+The commands of the following sections are stages of `Dockerfile.dev`, run from this folder.
+
 ```bash
 docker compose up checkoutservice
 ```
@@ -39,49 +41,66 @@ docker run --rm --network host -v "$(pwd)/protos:/protos" -w /protos fullstoryde
 
 ## Configuration
 
-- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`. Per-request logs are `debug`, so the default only shows startup, shutdown, each card charge, warnings and errors; `compose.yaml` sets `debug` for development.
+- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`; per-request logs are `debug`, and `compose.yaml` sets `debug` for development.
 
 ## Testing
 
 Use `dorny/test-reporter` action (`golang-json`). **Blocking**: the CI fails if any test fails.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app golang:1.27.1-alpine \
-  sh -c 'go test -json ./... > test-report.json'
+docker build -f Dockerfile.dev --target test --output type=local,dest=. .
 ```
 
 ## Coverage
 
-Use `gwatts/go-coverage-action` action. `genproto/` excluded as it's generated code. **Blocking**: the CI fails if coverage drops below the configured threshold.
+Use `gwatts/go-coverage-action` action. **Blocking**: the CI fails if coverage drops below the configured threshold.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app golang:1.27.1-alpine \
-  sh -c 'go test -coverprofile=coverage.out $(go list ./... | grep -v /genproto) && go tool cover -func=coverage.out'
+docker build -f Dockerfile.dev --target coverage --output type=local,dest=. .
 ```
 
 ## Linting
 
-Use `golangci-lint-action`, which runs the linter itself and annotates the PR natively (no separate report file needed). **Non-blocking**: informative only, never fails the CI.
+Use `golangci/golangci-lint-action`, which runs the linter itself and annotates the PR natively (no separate report file needed). **Non-blocking**: informative only, never fails the CI.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app golangci/golangci-lint:v2.14.0-alpine \
-  golangci-lint run ./...
+docker build -f Dockerfile.dev --target lint .
 ```
 
 ## Formatting
 
-Formats the code in place with `gofmt`. CI runs `gofmt -l .` instead, which only lists the files that need formatting. **Non-blocking**: informative only, never fails the CI.
+Formats the code in place with `gofmt`. **Non-blocking**: informative only, never fails the CI.
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app golang:1.27.1-alpine \
-  gofmt -l -w .
+docker build -f Dockerfile.dev --target format --output type=local,dest=. .
+docker build -f Dockerfile.dev --target format-check .
+```
+
+## Dependencies
+
+Updates every module to its latest version and tidies `go.mod`/`go.sum`.
+
+```bash
+docker build -f Dockerfile.dev --target dependencies --output type=local,dest=. .
+```
+
+## Generated code
+
+`genproto/` is generated from `protos/demo.proto` by `genproto.sh`. Regenerate it after changing the `.proto`:
+
+```bash
+docker build -f Dockerfile.dev --target codegen --build-context protos=../../protos --output type=local,dest=. .
 ```
 
 ## Vulnerability scan
 
-Scans the production image built in [Build and run in production](#build-and-run-in-production) for vulnerabilities and secrets with Trivy. CI runs the same command on the image built for the PR: **non-blocking**, informative only. The CD pipeline runs it with `--severity CRITICAL --exit-code 1` on the image pushed to the registry: **blocking** for promotion to the hardened scenario (any critical finding stops it), informative only for the baseline one.
+Scans the production image built above for vulnerabilities and secrets with Trivy, and the Go modules with `govulncheck`. CI runs both **non-blocking**; the CD pipeline runs Trivy with `--severity CRITICAL --exit-code 1`, **blocking** the promotion to the hardened scenario.
 
 ```bash
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.75.0 \
   image --scanners vuln,secret checkoutservice:prod
+```
+
+```bash
+docker build -f Dockerfile.dev --target vulncheck .
 ```

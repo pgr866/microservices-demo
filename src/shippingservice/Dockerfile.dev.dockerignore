@@ -1,7 +1,5 @@
 coverage.out
 test-report.json
-**/*_test.go
 Dockerfile*
 .dockerignore
 README.md
-genproto.sh

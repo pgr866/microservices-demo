@@ -71,7 +71,7 @@ type checkoutService struct {
 
 func main() {
 	port := listenPort
-	if os.Getenv("PORT") != "" {
+	if (os.Getenv("PORT") != "") == true {
 		port = os.Getenv("PORT")
 	}
 
@@ -151,7 +151,7 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 	}
 
 	orderResult := &pb.OrderResult{
-		OrderId:            fmt.Sprintf("%s", uuid.New().String()),
+		OrderId:            uuid.New().String(),
 		ShippingTrackingId: shippingTrackingID,
 		ShippingCost:       prep.shippingCostLocalized,
 		ShippingAddress:    req.GetAddress(),

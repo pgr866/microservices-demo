@@ -21,9 +21,15 @@ def service_with_catalog(*product_ids):
     return RecommendationService(stub)
 
 
+def incoming_call(time_remaining=5.0):
+    context = mock.Mock()
+    context.time_remaining.return_value = time_remaining
+    return context
+
+
 def recommend(service, *product_ids):
     request = demo_pb2.ListRecommendationsRequest(user_id="u1", product_ids=product_ids)
-    return set(service.ListRecommendations(request, mock.Mock()).product_ids)
+    return set(service.ListRecommendations(request, incoming_call()).product_ids)
 
 
 class CatalogError(grpc.RpcError):
@@ -65,12 +71,23 @@ def test_list_recommendations_ignores_request_ids_missing_from_the_catalog():
 
 def test_list_recommendations_passes_the_incoming_deadline_to_the_catalog():
     service = service_with_catalog("A")
-    context = mock.Mock()
-    context.time_remaining.return_value = 2.5
+
+    service.ListRecommendations(
+        demo_pb2.ListRecommendationsRequest(), incoming_call(time_remaining=2.5)
+    )
+
+    assert service.product_catalog_stub.ListProducts.call_args.kwargs["timeout"] == 2.5
+
+
+def test_list_recommendations_sets_no_catalog_timeout_without_an_incoming_deadline():
+    service = service_with_catalog("A")
+    # What gRPC reports for a call without a deadline: as a timeout, it would make
+    # every catalog call fail at once with DEADLINE_EXCEEDED.
+    context = incoming_call(time_remaining=9.223372035063481e18)
 
     service.ListRecommendations(demo_pb2.ListRecommendationsRequest(), context)
 
-    assert service.product_catalog_stub.ListProducts.call_args.kwargs["timeout"] == 2.5
+    assert service.product_catalog_stub.ListProducts.call_args.kwargs["timeout"] is None
 
 
 @pytest.mark.parametrize(
@@ -85,7 +102,7 @@ def test_list_recommendations_passes_the_incoming_deadline_to_the_catalog():
 def test_list_recommendations_translates_catalog_errors(catalog_code, expected_code):
     stub = mock.Mock()
     stub.ListProducts.side_effect = CatalogError(catalog_code)
-    context = mock.Mock()
+    context = incoming_call()
     # Like the real context, abort ends the handler by raising.
     context.abort.side_effect = RuntimeError("aborted")
 

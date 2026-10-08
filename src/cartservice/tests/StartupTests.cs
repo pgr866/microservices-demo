@@ -16,7 +16,7 @@ namespace cartservice.tests
     {
         private static Task<IHost> StartHost(Dictionary<string, string> config = null) =>
             new HostBuilder()
-                .ConfigureAppConfiguration(c => c.AddInMemoryCollection(config ?? new Dictionary<string, string>()))
+                .ConfigureAppConfiguration(c => c.AddInMemoryCollection(config ?? []))
                 .ConfigureWebHost(webBuilder => webBuilder.UseStartup<Startup>().UseTestServer())
                 .StartAsync(TestContext.Current.CancellationToken);
 

@@ -18,7 +18,6 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -97,7 +96,7 @@ func main() {
 	baseUrl = os.Getenv("BASE_URL")
 
 	srvPort := port
-	if os.Getenv("PORT") != "" {
+	if (os.Getenv("PORT") != "") == true {
 		srvPort = os.Getenv("PORT")
 	}
 	addr := os.Getenv("LISTEN_ADDR")
@@ -201,7 +200,7 @@ func newRouter(svc *frontendServer) http.Handler {
 	mux.Handle("GET "+baseUrl+"/static/", http.StripPrefix(baseUrl+"/static/", noDirListing(http.FileServer(http.Dir("./static/")))))
 	// Nothing to do if writing fails: the client is already gone.
 	mux.HandleFunc(baseUrl+"/robots.txt", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "User-agent: *\nDisallow: /") })
-	mux.HandleFunc(baseUrl+"/_healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, fmt.Sprintf("ok")) })
+	mux.HandleFunc(baseUrl+"/_healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") })
 	return mux
 }
 

@@ -22,7 +22,7 @@ namespace cartservice.services
 {
     internal class HealthCheckService : HealthBase
     {
-        private ICartStore _cartStore { get; }
+        private readonly ICartStore _cartStore;
 
         public HealthCheckService(ICartStore cartStore)
         {

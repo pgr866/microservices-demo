@@ -39,7 +39,11 @@ namespace cartservice.cartstore
 
         public Task AddItemAsync(string userId, string productId, int quantity)
         {
-            _logger.LogDebug("AddItem product_id={ProductId} quantity={Quantity}", productId, quantity);
+            // Debug is off in production: skip building the arguments on every call.
+            if (_logger.IsEnabled(LogLevel.Debug))
+            {
+                _logger.LogDebug("AddItem product_id={ProductId} quantity={Quantity}", productId, quantity);
+            }
             // One atomic step in the storage, so concurrent additions to the same
             // cart all count.
             return Guard(() => _storage.IncrementAsync(Key(userId), productId, quantity, CartLifetime));

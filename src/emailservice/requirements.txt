@@ -6,10 +6,6 @@ grpcio==1.84.0
     #   grpcio-health-checking
 grpcio-health-checking==1.84.0
     # via -r requirements.in
-jinja2==3.1.6
-    # via -r requirements.in
-markupsafe==3.0.3
-    # via jinja2
 protobuf==7.36.2
     # via grpcio-health-checking
 python-json-logger==4.2.0
