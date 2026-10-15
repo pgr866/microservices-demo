@@ -1,0 +1,314 @@
+# Local development only
+services:
+  productcatalogservice:
+    container_name: productcatalogservice
+    build:
+      context: ./src/productcatalogservice
+      dockerfile: Dockerfile.dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/productcatalogservice:/app
+      - productcatalogservice_cache:/cache
+    ports:
+      - "3550:3550"
+    environment:
+      PORT: "3550"
+      LOG_LEVEL: "debug"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "3550"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  shippingservice:
+    container_name: shippingservice
+    build:
+      context: ./src/shippingservice
+      dockerfile: Dockerfile.dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/shippingservice:/app
+      - shippingservice_cache:/cache
+    ports:
+      - "50051:50051"
+    environment:
+      PORT: "50051"
+      LOG_LEVEL: "debug"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "50051"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  paymentservice:
+    container_name: paymentservice
+    build:
+      context: ./src/paymentservice
+      dockerfile: Dockerfile.dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/paymentservice:/app
+      - paymentservice_node_modules:/app/node_modules
+    ports:
+      - "50052:50052"
+    environment:
+      PORT: "50052"
+      LOG_LEVEL: "debug"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "50052"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  currencyservice:
+    container_name: currencyservice
+    build:
+      context: ./src/currencyservice
+      dockerfile: Dockerfile.dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/currencyservice:/app
+      - currencyservice_node_modules:/app/node_modules
+    ports:
+      - "7000:7000"
+    environment:
+      PORT: "7000"
+      LOG_LEVEL: "debug"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "7000"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  emailservice:
+    container_name: emailservice
+    build:
+      context: ./src/emailservice
+      dockerfile: Dockerfile.dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/emailservice:/app
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      LOG_LEVEL: "debug"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  adservice:
+    container_name: adservice
+    build:
+      context: ./src/adservice
+      dockerfile: Dockerfile.dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/adservice:/app
+      - adservice_gradle_home:/home/dev/.gradle
+      - adservice_gradle_project:/app/.gradle
+      - adservice_build:/app/build
+    ports:
+      - "9555:9555"
+    environment:
+      PORT: "9555"
+      LOG_LEVEL: "debug"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9555"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 90s
+
+  redis-cart:
+    container_name: redis-cart
+    image: redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /data:uid=1000,gid=1000
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "6379"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  cartservice:
+    container_name: cartservice
+    build:
+      context: ./src/cartservice
+      dockerfile: Dockerfile.dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/cartservice:/app
+      - cartservice_nuget_packages:/home/dev/.nuget/packages
+      - cartservice_obj:/app/src/obj
+      - cartservice_bin:/app/src/bin
+    ports:
+      - "7070:7070"
+    environment:
+      ASPNETCORE_HTTP_PORTS: "7070"
+      LOG_LEVEL: "debug"
+      REDIS_ADDR: "redis-cart:6379"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "7070"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 90s
+    depends_on:
+      redis-cart:
+        condition: service_healthy
+
+  recommendationservice:
+    container_name: recommendationservice
+    build:
+      context: ./src/recommendationservice
+      dockerfile: Dockerfile.dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/recommendationservice:/app
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      LOG_LEVEL: "debug"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8081"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+    depends_on:
+      productcatalogservice:
+        condition: service_healthy
+
+  checkoutservice:
+    container_name: checkoutservice
+    build:
+      context: ./src/checkoutservice
+      dockerfile: Dockerfile.dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/checkoutservice:/app
+      - checkoutservice_cache:/cache
+    ports:
+      - "5050:5050"
+    environment:
+      PORT: "5050"
+      LOG_LEVEL: "debug"
+      SHIPPING_SERVICE_ADDR: "shippingservice:50051"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+      CART_SERVICE_ADDR: "cartservice:7070"
+      CURRENCY_SERVICE_ADDR: "currencyservice:7000"
+      EMAIL_SERVICE_ADDR: "emailservice:8080"
+      PAYMENT_SERVICE_ADDR: "paymentservice:50052"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "5050"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+    depends_on:
+      shippingservice:
+        condition: service_healthy
+      productcatalogservice:
+        condition: service_healthy
+      cartservice:
+        condition: service_healthy
+      currencyservice:
+        condition: service_healthy
+      emailservice:
+        condition: service_healthy
+      paymentservice:
+        condition: service_healthy
+
+  frontend:
+    container_name: frontend
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile.dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/frontend:/app
+      - frontend_cache:/cache
+    ports:
+      - "8082:8082"
+    environment:
+      PORT: "8082"
+      LOG_LEVEL: "debug"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+      CURRENCY_SERVICE_ADDR: "currencyservice:7000"
+      CART_SERVICE_ADDR: "cartservice:7070"
+      RECOMMENDATION_SERVICE_ADDR: "recommendationservice:8081"
+      SHIPPING_SERVICE_ADDR: "shippingservice:50051"
+      CHECKOUT_SERVICE_ADDR: "checkoutservice:5050"
+      AD_SERVICE_ADDR: "adservice:9555"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8082/_healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+    depends_on:
+      productcatalogservice:
+        condition: service_healthy
+      currencyservice:
+        condition: service_healthy
+      cartservice:
+        condition: service_healthy
+      recommendationservice:
+        condition: service_healthy
+      shippingservice:
+        condition: service_healthy
+      checkoutservice:
+        condition: service_healthy
+      adservice:
+        condition: service_healthy
+
+volumes:
+  productcatalogservice_cache:
+  shippingservice_cache:
+  checkoutservice_cache:
+  frontend_cache:
+  paymentservice_node_modules:
+  currencyservice_node_modules:
+  adservice_gradle_home:
+  adservice_gradle_project:
+  adservice_build:
+  cartservice_nuget_packages:
+  cartservice_obj:
+  cartservice_bin:

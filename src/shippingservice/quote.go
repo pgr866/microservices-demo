@@ -14,23 +14,13 @@
 
 package main
 
-import (
-	"fmt"
-	"math"
-)
+import "math"
 
-// Quote represents a currency value.
 type Quote struct {
 	Dollars uint32
 	Cents   uint32
 }
 
-// String representation of the Quote.
-func (q Quote) String() string {
-	return fmt.Sprintf("$%d.%d", q.Dollars, q.Cents)
-}
-
-// CreateQuoteFromCount takes a number of items and returns a shipping quote.
 func CreateQuoteFromCount(count int) Quote {
 	if count == 0 {
 		return CreateQuoteFromFloat(0)
@@ -38,11 +28,8 @@ func CreateQuoteFromCount(count int) Quote {
 	return CreateQuoteFromFloat(8.99)
 }
 
-// CreateQuoteFromFloat takes a price represented as a float and creates a Price struct.
 func CreateQuoteFromFloat(value float64) Quote {
-	units, fraction := math.Modf(value)
-	return Quote{
-		uint32(units),
-		uint32(math.Trunc(fraction * 100)),
-	}
+	// Round, not truncate: 0.29 * 100 is 28.999999999999996 in floating point.
+	cents := uint32(math.Round(value * 100))
+	return Quote{cents / 100, cents % 100}
 }

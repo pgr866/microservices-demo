@@ -1,0 +1,55 @@
+# Local development (the last stage, the default one) and one stage per tooling command of the README.
+
+FROM python:3.14.8-alpine AS base
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_ROOT_USER_ACTION=ignore
+WORKDIR /app
+COPY --from=ghcr.io/astral-sh/uv:0.12.23-python3.14-alpine /usr/local/bin/uv /usr/local/bin/
+COPY requirements.txt requirements-test.in ./
+RUN --mount=type=cache,target=/root/.cache/pip,id=pip \
+    pip install grpcio-tools==1.84.0 -r requirements.txt -r requirements-test.in
+
+FROM base AS source
+COPY . .
+
+FROM source AS test-run
+RUN pytest --junitxml=reports/junit.xml
+FROM scratch AS test
+COPY --from=test-run /app/reports/ /reports/
+
+FROM source AS coverage-run
+RUN pytest --cov=recommendation_server --cov=logger --cov-report=term --cov-report=xml:reports/coverage.xml
+FROM scratch AS coverage
+COPY --from=coverage-run /app/reports/ /reports/
+
+FROM source AS lint
+RUN ruff check .
+
+FROM source AS format-run
+RUN ruff format . && mkdir /out \
+    && find . -maxdepth 1 -name '*.py' -not -name 'demo_pb2*' | xargs -I{} cp {} /out
+FROM scratch AS format
+COPY --from=format-run /out/ /
+
+FROM source AS format-check
+RUN ruff format --check .
+
+FROM source AS dependencies-run
+RUN uv pip compile --upgrade requirements.in -o requirements.txt
+FROM scratch AS dependencies
+COPY --from=dependencies-run /app/requirements.txt /
+
+FROM base AS codegen-run
+WORKDIR /repo/src/app
+COPY --from=protos . /repo/protos
+COPY . .
+RUN sh genproto.sh
+FROM scratch AS codegen
+COPY --from=codegen-run /repo/src/app/demo_pb2.py /repo/src/app/demo_pb2_grpc.py /
+
+FROM base AS dev
+COPY --from=fullstorydev/grpcurl:v1.9.3-alpine /bin/grpcurl /usr/local/bin/
+RUN --mount=type=cache,target=/root/.cache/pip,id=pip \
+    pip install watchdog==6.0.0
+RUN apk add --no-cache git bash && adduser -D -u 1000 dev
+USER dev
+ENTRYPOINT ["watchmedo", "auto-restart", "--directory=.", "--pattern=*.py", "--recursive", "--", "python", "recommendation_server.py"]

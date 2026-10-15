@@ -1,0 +1,5 @@
+extend-exclude = ["demo_pb2.py", "demo_pb2_grpc.py"]
+
+[lint]
+# G: logging calls take lazy %-style arguments, never f-strings or format().
+extend-select = ["SIM", "G"]

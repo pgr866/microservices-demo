@@ -1,0 +1,48 @@
+# Local development (the last stage, the default one) and one stage per tooling command of the README.
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24 AS base
+RUN apk add --no-cache gcompat
+WORKDIR /app
+
+FROM base AS deps
+COPY src/cartservice.csproj src/
+COPY tests/cartservice.tests.csproj tests/
+# Packages sit in a cache mount; this layer still keeps obj/project.assets.json, so publish skips the restore.
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet restore tests/cartservice.tests.csproj
+
+FROM deps AS source
+COPY . .
+
+FROM source AS test-run
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet test tests/cartservice.tests.csproj --logger "trx;LogFileName=test-results.trx"
+FROM scratch AS test
+COPY --from=test-run /app/tests/TestResults/ /tests/TestResults/
+
+FROM source AS coverage-run
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet test tests/cartservice.tests.csproj --collect:"XPlat Code Coverage" --settings tests/coverlet.runsettings
+FROM scratch AS coverage
+COPY --from=coverage-run /app/tests/TestResults/ /tests/TestResults/
+
+FROM source AS lint
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet format --verify-no-changes
+
+FROM source AS format-run
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet format && mkdir /out \
+    && find src tests -name '*.cs' -not -path '*/obj/*' -not -path '*/bin/*' | xargs -I{} cp --parents {} /out
+FROM scratch AS format
+COPY --from=format-run /out/ /
+
+FROM source AS dependencies
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet list cartservice.slnx package --outdated \
+    && dotnet list cartservice.slnx package --vulnerable --include-transitive \
+    && dotnet list cartservice.slnx package --deprecated
+
+FROM base AS dev
+COPY --from=fullstorydev/grpcurl:v1.9.3-alpine /bin/grpcurl /usr/local/bin/
+# /workspace/...: mount points of the devcontainer's named volumes, pre-created so they are owned by uid 1000.
+RUN apk add --no-cache git bash \
+    && adduser -D -u 1000 dev \
+    && install -d -o dev -g dev /home/dev/.nuget /home/dev/.nuget/packages src src/obj src/bin \
+       /workspace/src/cartservice/src/obj /workspace/src/cartservice/src/bin
+USER dev
+ENTRYPOINT ["dotnet", "watch", "run", "--project", "src/cartservice.csproj", "--non-interactive"]

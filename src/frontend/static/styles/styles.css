@@ -120,13 +120,6 @@ header .icon {
   height: 20px;
 }
 
-header .icon.search-icon {
-  width: 12px;
-  height: 13px;
-  position: absolute;
-  left: 10px;
-}
-
 /* The currency drop-down. */
 
 header img.currency-icon, header span.currency-icon {
@@ -253,30 +246,13 @@ footer .footer-top a {
   text-decoration: underline;
 }
 
-/* The <p> containing the session-id. */
+/* The <p> containing the request ID and the pod. */
 footer .footer-top p:nth-child(3) {
   margin-top: 56px;
 }
 
-footer .footer-top .footer-social,
-footer .footer-top .footer-app,
-footer .footer-links,
-footer .footer-top .social,
-footer .footer-top .app {
-  display: block;
-  align-items: center;
-}
-
 footer .footer-top .footer-social {
   padding: 31px;
-}
-
-footer .footer-top .footer-social h4 {
-  margin-bottom: 0;
-}
-
-footer .footer-top .footer-social div {
-  width: 50%;
 }
 
 /* Home */
@@ -290,13 +266,6 @@ main {
   .home .container-fluid {
     height: calc(100vh - 91px); /* 91px is the height of the top/header bars. */
   }
-  .home .container-fluid > .row > .col-4 {
-    height: calc(100vh - 91px);
-  }
-  .home .container-fluid > .row > .col-lg-8 {
-    height: calc(100vh - 91px);
-    overflow-y: scroll;
-  }
 
   .px-10-percent {
     padding-left: 10%;
@@ -306,12 +275,7 @@ main {
 
 .home-mobile-hero-banner {
   height: 200px;
-  background: url(/static/images/folded-clothes-on-white-chair-wide.jpg) no-repeat top center;
-  background-size: cover;
-}
-
-.home-desktop-left-image {
-  background: url(/static/images/folded-clothes-on-white-chair.jpg) no-repeat center;
+  background: url(../images/folded-clothes-on-white-chair-wide.jpg) no-repeat top center;
   background-size: cover;
 }
 
@@ -435,29 +399,6 @@ similar to that of the hot-products-row.
   line-height: 1.14;
   font-weight: normal;
   color: #111111;
-}
-
-.h-product .product-packaging {
-  margin: 0 0 15px 0;
-}
-
-.h-product .product-packaging h3 {
-  font-size: 20px;
-}
-
-.h-product .product-packaging span {
-  display: inline-block;
-  margin: 0 10px 0 0;
-}
-
-.h-product .input-group-text,
-.h-product .btn.btn-info {
-  font-size: 18px;
-  line-height: 1.89;
-  letter-spacing: 3.6px;
-  text-align: center;
-  color: #111111;
-  border-radius: 0;
 }
 
 .product-quantity-dropdown {
@@ -674,4 +615,9 @@ the rules below could be extracted.
   right: 25px;
   width: 10px;
   height: 5px;
+}
+
+.error-details {
+    white-space: pre-wrap;
+    word-break: keep-all;
 }

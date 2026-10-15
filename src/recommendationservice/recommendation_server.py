@@ -16,141 +16,153 @@
 
 import os
 import random
-import time
-import traceback
+import signal
+import sys
 from concurrent import futures
 
-# @TODO: Temporarily removed in https://github.com/GoogleCloudPlatform/microservices-demo/pull/3196
-# import googlecloudprofiler
-
-from google.auth.exceptions import DefaultCredentialsError
 import grpc
+from grpc_health.v1 import health_pb2, health_pb2_grpc
 
 import demo_pb2
 import demo_pb2_grpc
-from grpc_health.v1 import health_pb2
-from grpc_health.v1 import health_pb2_grpc
+from logger import exit_on_invalid_log_level, getJSONLogger
 
-from opentelemetry import trace
-from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient, GrpcInstrumentorServer
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+logger = getJSONLogger("recommendationservice-server")
 
-from logger import getJSONLogger
-logger = getJSONLogger('recommendationservice-server')
+# Catalog errors worth retrying: reported as UNAVAILABLE, any other one as INTERNAL.
+TRANSIENT_CODES = {
+    grpc.StatusCode.UNAVAILABLE,
+    grpc.StatusCode.DEADLINE_EXCEEDED,
+    grpc.StatusCode.RESOURCE_EXHAUSTED,
+}
 
-def initStackdriverProfiling():
-  project_id = None
-  try:
-    project_id = os.environ["GCP_PROJECT_ID"]
-  except KeyError:
-    # Environment variable not set
-    pass
+# Without a deadline, time_remaining() is ~2^63 s, which overflows as a timeout.
+NO_DEADLINE_SECONDS = 2**62
 
-  # @TODO: Temporarily removed in https://github.com/GoogleCloudPlatform/microservices-demo/pull/3196
-  # for retry in range(1,4):
-  #   try:
-  #     if project_id:
-  #       googlecloudprofiler.start(service='recommendation_server', service_version='1.0.0', verbose=0, project_id=project_id)
-  #     else:
-  #       googlecloudprofiler.start(service='recommendation_server', service_version='1.0.0', verbose=0)
-  #     logger.info("Successfully started Stackdriver Profiler.")
-  #     return
-  #   except (BaseException) as exc:
-  #     logger.info("Unable to start Stackdriver Profiler Python agent. " + str(exc))
-  #     if (retry < 4):
-  #       logger.info("Sleeping %d seconds to retry Stackdriver Profiler agent initialization"%(retry*10))
-  #       time.sleep (1)
-  #     else:
-  #       logger.warning("Could not initialize Stackdriver Profiler after retrying, giving up")
-  return
-
-class RecommendationService(demo_pb2_grpc.RecommendationServiceServicer):
-    def ListRecommendations(self, request, context):
-        max_responses = 5
-        # fetch list of products from product catalog stub
-        cat_response = product_catalog_stub.ListProducts(demo_pb2.Empty())
-        product_ids = [x.id for x in cat_response.products]
-        filtered_products = list(set(product_ids)-set(request.product_ids))
-        num_products = len(filtered_products)
-        num_return = min(max_responses, num_products)
-        # sample list of indicies to return
-        indices = random.sample(range(num_products), num_return)
-        # fetch product ids from indices
-        prod_list = [filtered_products[i] for i in indices]
-        logger.info("[Recv ListRecommendations] product_ids={}".format(prod_list))
-        # build and return response
-        response = demo_pb2.ListRecommendationsResponse()
-        response.product_ids.extend(prod_list)
-        return response
-
-    def Check(self, request, context):
-        return health_pb2.HealthCheckResponse(
-            status=health_pb2.HealthCheckResponse.SERVING)
-
-    def Watch(self, request, context):
-        return health_pb2.HealthCheckResponse(
-            status=health_pb2.HealthCheckResponse.UNIMPLEMENTED)
+MAX_RECOMMENDATIONS = 5
 
 
-if __name__ == "__main__":
-    logger.info("initializing recommendationservice")
+class RecommendationService(
+    demo_pb2_grpc.RecommendationServiceServicer, health_pb2_grpc.HealthServicer
+):
+    def __init__(self, product_catalog_stub: demo_pb2_grpc.ProductCatalogServiceStub):
+        self.product_catalog_stub = product_catalog_stub
+        self.serving = True
 
-    try:
-      if "DISABLE_PROFILER" in os.environ:
-        raise KeyError()
-      else:
-        logger.info("Profiler enabled.")
-        initStackdriverProfiling()
-    except KeyError:
-        logger.info("Profiler disabled.")
-
-    try:
-      grpc_client_instrumentor = GrpcInstrumentorClient()
-      grpc_client_instrumentor.instrument()
-      grpc_server_instrumentor = GrpcInstrumentorServer()
-      grpc_server_instrumentor.instrument()
-      if os.environ["ENABLE_TRACING"] == "1":
-        trace.set_tracer_provider(TracerProvider())
-        otel_endpoint = os.getenv("COLLECTOR_SERVICE_ADDR", "localhost:4317")
-        trace.get_tracer_provider().add_span_processor(
-          BatchSpanProcessor(
-              OTLPSpanExporter(
-              endpoint = otel_endpoint,
-              insecure = True
+    def ListRecommendations(
+        self,
+        request: demo_pb2.ListRecommendationsRequest,
+        context: grpc.ServicerContext,
+    ) -> demo_pb2.ListRecommendationsResponse:
+        try:
+            # Propagates the caller's deadline.
+            remaining = context.time_remaining()
+            cat_response = self.product_catalog_stub.ListProducts(
+                demo_pb2.Empty(),
+                timeout=remaining if remaining < NO_DEADLINE_SECONDS else None,
             )
-          )
+        except grpc.RpcError as err:
+            code = (
+                grpc.StatusCode.UNAVAILABLE
+                if err.code() in TRANSIENT_CODES
+                else grpc.StatusCode.INTERNAL
+            )
+            logger.warning("failed to list products: %s %s", err.code(), err.details())
+            context.abort(code, "failed to list products")
+        candidates = list(
+            {p.id for p in cat_response.products} - set(request.product_ids)
         )
-    except (KeyError, DefaultCredentialsError):
-        logger.info("Tracing disabled.")
-    except Exception as e:
-        logger.warn(f"Exception on Cloud Trace setup: {traceback.format_exc()}, tracing disabled.") 
+        prod_list = random.sample(candidates, min(MAX_RECOMMENDATIONS, len(candidates)))
+        logger.debug("[Recv ListRecommendations] product_ids=%s", prod_list)
+        return demo_pb2.ListRecommendationsResponse(product_ids=prod_list)
 
-    port = os.environ.get('PORT', "8080")
-    catalog_addr = os.environ.get('PRODUCT_CATALOG_SERVICE_ADDR', '')
-    if catalog_addr == "":
-        raise Exception('PRODUCT_CATALOG_SERVICE_ADDR environment variable not set')
-    logger.info("product catalog address: " + catalog_addr)
+    def Check(
+        self, request: health_pb2.HealthCheckRequest, context: grpc.ServicerContext
+    ) -> health_pb2.HealthCheckResponse:
+        status = (
+            health_pb2.HealthCheckResponse.SERVING
+            if self.serving
+            else health_pb2.HealthCheckResponse.NOT_SERVING
+        )
+        return health_pb2.HealthCheckResponse(status=status)
+
+    def Watch(
+        self, request: health_pb2.HealthCheckRequest, context: grpc.ServicerContext
+    ) -> None:
+        context.abort(grpc.StatusCode.UNIMPLEMENTED, "Watch is not implemented")
+
+
+# Below the 30 s Kubernetes waits before sending SIGKILL.
+SHUTDOWN_GRACE_SECONDS = 10
+
+
+# Handlers mostly wait on I/O, so the GIL is not the bottleneck at this size.
+DEFAULT_MAX_WORKERS = 50
+# Beyond this queue, RESOURCE_EXHAUSTED at once instead of queueing past deadlines.
+MAX_CONCURRENT_RPCS_PER_WORKER = 2
+
+
+def max_workers() -> int | None:
+    """None if MAX_WORKERS is set but not a positive integer."""
+    value = os.environ.get("MAX_WORKERS") or str(DEFAULT_MAX_WORKERS)
+    try:
+        workers = int(value)
+    except ValueError:
+        return None
+    return workers if workers > 0 else None
+
+
+def new_server() -> grpc.Server:
+    """Exits with one JSON log line, and no traceback, on an invalid MAX_WORKERS."""
+    workers = max_workers()
+    if workers is None:
+        logger.error(
+            "invalid MAX_WORKERS %r: expected a positive integer",
+            os.environ["MAX_WORKERS"],
+        )
+        sys.exit(1)
+    logger.info("max workers: %d", workers)
+    return grpc.server(
+        futures.ThreadPoolExecutor(max_workers=workers),
+        maximum_concurrent_rpcs=workers * MAX_CONCURRENT_RPCS_PER_WORKER,
+    )
+
+
+def stop_on_signals(server: grpc.Server, service: RecommendationService) -> None:
+    """Needed: as PID 1 in the container, Python would otherwise ignore SIGTERM."""
+
+    def handle(signum: int, _frame: object) -> None:
+        logger.info("received %s, shutting down", signal.Signals(signum).name)
+        service.serving = False
+        server.stop(SHUTDOWN_GRACE_SECONDS)
+
+    signal.signal(signal.SIGTERM, handle)
+    signal.signal(signal.SIGINT, handle)
+
+
+def start() -> None:
+    port = os.environ.get("PORT", "8081")
+    catalog_addr = os.environ.get("PRODUCT_CATALOG_SERVICE_ADDR", "")
+    if True if catalog_addr == "" else False:
+        logger.error("PRODUCT_CATALOG_SERVICE_ADDR environment variable not set")
+        sys.exit(1)
+    logger.info("product catalog address: %s", catalog_addr)
     channel = grpc.insecure_channel(catalog_addr)
-    product_catalog_stub = demo_pb2_grpc.ProductCatalogServiceStub(channel)
 
-    # create gRPC server
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    server = new_server()
+    service = RecommendationService(demo_pb2_grpc.ProductCatalogServiceStub(channel))
 
-    # add class to gRPC server
-    service = RecommendationService()
     demo_pb2_grpc.add_RecommendationServiceServicer_to_server(service, server)
     health_pb2_grpc.add_HealthServicer_to_server(service, server)
 
-    # start server
-    logger.info("listening on port: " + port)
-    server.add_insecure_port('[::]:'+port)
+    logger.info("listening on port: %s", port)
+    server.add_insecure_port(f"[::]:{port}")
     server.start()
+    stop_on_signals(server, service)
+    server.wait_for_termination()
 
-    # keep alive
-    try:
-         while True:
-            time.sleep(10000)
-    except KeyboardInterrupt:
-            server.stop(0)
+
+if __name__ == "__main__":
+    exit_on_invalid_log_level(logger)
+    logger.info("initializing recommendationservice")
+    start()

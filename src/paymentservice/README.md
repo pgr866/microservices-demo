@@ -1,0 +1,98 @@
+# paymentservice
+
+The Payment service charges the given credit card info (mock) with the given amount and returns a transaction ID.
+
+## Build and run in production
+
+```bash
+docker build -t paymentservice:prod .
+docker run --rm -p 50052:50052 -e PORT=50052 paymentservice:prod
+```
+
+## Development
+
+The recommended way is the service's devcontainer (`.devcontainer/paymentservice`): in VS Code, run *Dev Containers: Reopen in Container* and select `paymentservice`. It starts the service with hot reload and gives you every tool used in this document.
+
+After changing `package.json`, run `docker compose down -v paymentservice` first so the `node_modules` volume is refilled.
+
+The Docker commands of the following sections are stages of `Dockerfile.dev`; run every command from the service folder, `src/paymentservice`.
+
+Without the devcontainer, start it with hot reload using Compose **from the repo root**:
+
+```bash
+docker compose up paymentservice
+```
+
+## Manual test request
+
+Calls `Charge` and returns a mock transaction ID as JSON:
+
+```bash
+docker exec paymentservice grpcurl -plaintext -import-path /protos -proto demo.proto \
+  -d '{"amount": {"currency_code": "USD", "units": 10, "nanos": 0}, "credit_card": {"credit_card_number": "4432-8015-6152-0454", "credit_card_cvv": 672, "credit_card_expiration_year": 2030, "credit_card_expiration_month": 1}}' \
+  localhost:50052 hipstershop.PaymentService/Charge
+```
+
+## Configuration
+
+- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`; per-request logs are `debug`, and `compose.yaml` sets `debug` for development.
+- `PORT`: port to listen on (default `50052`).
+
+## Testing
+
+Use `dorny/test-reporter` action (`java-junit`, via `jest-junit`). **Blocking**: the CI fails if any test fails.
+
+```bash
+docker build -f Dockerfile.dev --target test --output type=local,dest=. .
+```
+
+## Coverage
+
+Use `ArtiomTr/jest-coverage-report-action` action. **Blocking**: the CI fails if coverage drops below the configured threshold.
+
+```bash
+docker build -f Dockerfile.dev --target coverage --output type=local,dest=. .
+```
+
+## Linting
+
+Use `reviewdog/action-eslint` action, which annotates the PR inline. **Non-blocking**: informative only, never fails the CI.
+
+```bash
+docker build -f Dockerfile.dev --target lint .
+```
+
+## Formatting
+
+Formats the code in place with Prettier (`.prettierrc.json`). **Non-blocking**: informative only, never fails the CI.
+
+```bash
+docker build -f Dockerfile.dev --target format --output type=local,dest=. .
+docker build -f Dockerfile.dev --target format-check .
+```
+
+## Dependencies
+
+The command lists the outdated dependencies and the known vulnerabilities and refreshes `package-lock.json`; to update one, change its version in `package.json` first.
+
+```bash
+docker build -f Dockerfile.dev --target dependencies --output type=local,dest=. .
+```
+
+## Generated code
+
+`proto/` is a copy of `protos/` that `@grpc/proto-loader` reads at runtime. Refresh it with `genproto.sh` after changing the `.proto`:
+
+```bash
+docker build -f Dockerfile.dev --target codegen --build-context protos=../../protos --output type=local,dest=. .
+```
+
+## Vulnerability scan
+
+Builds the production image and scans it for vulnerabilities and secrets with Trivy. CI runs it **non-blocking**; the CD pipeline runs it with `--severity CRITICAL --exit-code 1`, **blocking** the promotion to the hardened scenario.
+
+```bash
+docker build -t paymentservice:prod .
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.0 \
+  image --scanners vuln,secret paymentservice:prod
+```

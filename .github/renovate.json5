@@ -13,14 +13,14 @@
     enabled: false,
   },
   constraints: {
-    python: '3.14.7',
+    python: '3.14.8',
   },
   kubernetes: {
     managerFilePatterns: [
       '/\\.yaml$/',
     ],
     ignorePaths: [
-      'release/**',
+      // Whether Renovate should update kustomize/base is decided in Tarea 8.
       'kustomize/base/**',
     ],
   },

@@ -1,0 +1,29 @@
+{
+  "name": "shippingservice",
+  "dockerComposeFile": "../../compose.yaml",
+  "service": "shippingservice",
+  "runServices": ["shippingservice"],
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=/usr/bin/docker,target=/usr/bin/docker,type=bind,readonly",
+    "source=/usr/libexec/docker/cli-plugins,target=/usr/libexec/docker/cli-plugins,type=bind,readonly",
+    "source=${localWorkspaceFolder},target=/workspace,type=bind"
+  ],
+  "remoteEnv": {
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_0": "git@github.com:"
+  },
+  "workspaceFolder": "/workspace/src/shippingservice",
+  "overrideCommand": true,
+  "postStartCommand": ["air", "-tmp_dir", "/tmp/air", "-build.cmd", "go build -o /tmp/air/main .", "-build.entrypoint", "/tmp/air/main"],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "git.openRepositoryInParentFolders": "always",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": ["golang.go"]
+    }
+  }
+}

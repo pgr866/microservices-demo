@@ -1,0 +1,31 @@
+{
+  "name": "cartservice",
+  "dockerComposeFile": "../../compose.yaml",
+  "service": "cartservice",
+  "runServices": ["cartservice"],
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=/usr/bin/docker,target=/usr/bin/docker,type=bind,readonly",
+    "source=/usr/libexec/docker/cli-plugins,target=/usr/libexec/docker/cli-plugins,type=bind,readonly",
+    "source=${localWorkspaceFolder},target=/workspace,type=bind",
+    "source=cartservice_obj,target=/workspace/src/cartservice/src/obj,type=volume",
+    "source=cartservice_bin,target=/workspace/src/cartservice/src/bin,type=volume"
+  ],
+  "remoteEnv": {
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_0": "git@github.com:"
+  },
+  "workspaceFolder": "/workspace/src/cartservice",
+  "overrideCommand": true,
+  "postStartCommand": ["dotnet", "watch", "run", "--project", "src/cartservice.csproj", "--non-interactive"],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "git.openRepositoryInParentFolders": "always",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": ["ms-dotnettools.csharp"]
+    }
+  }
+}

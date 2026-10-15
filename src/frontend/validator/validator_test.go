@@ -15,6 +15,7 @@
 package validator
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -143,6 +144,8 @@ func TestAddToCartFailsValidation(t *testing.T) {
 	}
 }
 
+var shopCurrencies = map[string]bool{"USD": true, "EUR": true, "CAD": true, "JPY": true, "GBP": true, "TRY": true}
+
 func TestSetCurrencyPassesValidation(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -157,7 +160,7 @@ func TestSetCurrencyPassesValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			payload := SetCurrencyPayload{Currency: tt.currency}
+			payload := SetCurrencyPayload{Currency: tt.currency, Allowed: shopCurrencies}
 			if err := payload.Validate(); err != nil {
 				t.Errorf("want validation on %v, got %v", payload, err)
 			}
@@ -171,15 +174,89 @@ func TestSetCurrencyFailsValidation(t *testing.T) {
 		currency string
 	}{
 		{"invalid currency", "ABC"},
+		{"valid ISO 4217 code the shop does not accept", "AUD"},
 		{"invalid currency (symbol)", "$"},
 		{"invalid (no currency)", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			payload := SetCurrencyPayload{Currency: tt.currency}
+			payload := SetCurrencyPayload{Currency: tt.currency, Allowed: shopCurrencies}
 			if err := payload.Validate(); err == nil {
 				t.Errorf("want validation on %v, got %v", payload, err)
 			}
 		})
+	}
+}
+
+func TestValidationErrorResponse(t *testing.T) {
+	payload := AddToCartPayload{Quantity: 0, ProductID: ""}
+	err := ValidationErrorResponse(payload.Validate())
+	for _, field := range []string{"Field 'Quantity' is invalid: required", "Field 'ProductID' is invalid: required"} {
+		if !strings.Contains(err.Error(), field) {
+			t.Errorf("message %q does not mention %q", err.Error(), field)
+		}
+	}
+
+	if err := ValidationErrorResponse(errors.New("not a validation error")); err.Error() != "invalid validation error format" {
+		t.Errorf("message = %q, want the generic one for an unexpected error", err.Error())
+	}
+}
+
+func TestIsEmail(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"someone@example.com", true},
+		{"first.last+tag@sub.example.co.uk", true},
+		{"test@example", false},
+		{"test@example.", false},
+		{"test@.example.com", false},
+		{"Someone <someone@example.com>", false},
+		{"not-an-email", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isEmail(tt.in); got != tt.want {
+			t.Errorf("isEmail(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestIsCreditCard(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"4432801561520454", true},
+		{"4432 8015 6152 0454", true},
+		{"4432801561520455", false},     // wrong checksum
+		{"4432-8015-6152-0454", false},  // dashes aren't digits
+		{"4432 80 15 6152 0454", false}, // group shorter than 3
+		{"52729400007", false},          // 11 digits
+		{"44328015615204544432", false}, // 20 digits
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isCreditCard(tt.in); got != tt.want {
+			t.Errorf("isCreditCard(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestOneErrorPerField(t *testing.T) {
+	// Empty breaks both "required" and "email": only the first one is reported.
+	payload := PlaceOrderPayload{StreetAddress: "a", ZipCode: 1, City: "a", State: "a", Country: "a",
+		CcNumber: "4432801561520454", CcMonth: 1, CcYear: 2030, CcCVV: 1}
+	if got := payload.Validate().Error(); got != "Field 'Email' is invalid: required\n" {
+		t.Errorf("message = %q, want only the first rule broken by Email", got)
+	}
+}
+
+func TestMaxLengthCountsCharacters(t *testing.T) {
+	payload := PlaceOrderPayload{Email: "a@b.co", StreetAddress: strings.Repeat("ñ", 512), ZipCode: 1, City: "a", State: "a",
+		Country: "a", CcNumber: "4432801561520454", CcMonth: 1, CcYear: 2030, CcCVV: 1}
+	if err := payload.Validate(); err != nil {
+		t.Errorf("512 characters (1024 bytes) rejected: %v", err)
 	}
 }

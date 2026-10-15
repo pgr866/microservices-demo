@@ -1,0 +1,30 @@
+{
+  "name": "paymentservice",
+  "dockerComposeFile": "../../compose.yaml",
+  "service": "paymentservice",
+  "runServices": ["paymentservice"],
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=/usr/bin/docker,target=/usr/bin/docker,type=bind,readonly",
+    "source=/usr/libexec/docker/cli-plugins,target=/usr/libexec/docker/cli-plugins,type=bind,readonly",
+    "source=${localWorkspaceFolder},target=/workspace,type=bind",
+    "source=paymentservice_node_modules,target=/workspace/src/paymentservice/node_modules,type=volume"
+  ],
+  "remoteEnv": {
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_0": "git@github.com:"
+  },
+  "workspaceFolder": "/workspace/src/paymentservice",
+  "overrideCommand": true,
+  "postStartCommand": ["npm", "run", "dev"],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "git.openRepositoryInParentFolders": "always",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode", "Orta.vscode-jest"]
+    }
+  }
+}

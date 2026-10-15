@@ -14,187 +14,119 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from concurrent import futures
-import argparse
 import os
+import signal
 import sys
-import time
+from concurrent import futures
+
 import grpc
-import traceback
-from jinja2 import Environment, FileSystemLoader, select_autoescape, TemplateError
-from google.api_core.exceptions import GoogleAPICallError
-from google.auth.exceptions import DefaultCredentialsError
+from grpc_health.v1 import health_pb2, health_pb2_grpc
 
 import demo_pb2
 import demo_pb2_grpc
-from grpc_health.v1 import health_pb2
-from grpc_health.v1 import health_pb2_grpc
+from logger import exit_on_invalid_log_level, getJSONLogger
 
-from opentelemetry import trace
-from opentelemetry.instrumentation.grpc import GrpcInstrumentorServer
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-
-# @TODO: Temporarily removed in https://github.com/GoogleCloudPlatform/microservices-demo/pull/3196
-# import googlecloudprofiler
-
-from logger import getJSONLogger
-logger = getJSONLogger('emailservice-server')
-
-# Loads confirmation email template from file
-env = Environment(
-    loader=FileSystemLoader('templates'),
-    autoescape=select_autoescape(['html', 'xml'])
-)
-template = env.get_template('confirmation.html')
-
-class BaseEmailService(demo_pb2_grpc.EmailServiceServicer):
-  def Check(self, request, context):
-    return health_pb2.HealthCheckResponse(
-      status=health_pb2.HealthCheckResponse.SERVING)
-  
-  def Watch(self, request, context):
-    return health_pb2.HealthCheckResponse(
-      status=health_pb2.HealthCheckResponse.UNIMPLEMENTED)
-
-class EmailService(BaseEmailService):
-  def __init__(self):
-    raise Exception('cloud mail client not implemented')
-    super().__init__()
-
-  @staticmethod
-  def send_email(client, email_address, content):
-    response = client.send_message(
-      sender = client.sender_path(project_id, region, sender_id),
-      envelope_from_authority = '',
-      header_from_authority = '',
-      envelope_from_address = from_address,
-      simple_message = {
-        "from": {
-          "address_spec": from_address,
-        },
-        "to": [{
-          "address_spec": email_address
-        }],
-        "subject": "Your Confirmation Email",
-        "html_body": content
-      }
-    )
-    logger.info("Message sent: {}".format(response.rfc822_message_id))
-
-  def SendOrderConfirmation(self, request, context):
-    email = request.email
-    order = request.order
-
-    try:
-      confirmation = template.render(order = order)
-    except TemplateError as err:
-      context.set_details("An error occurred when preparing the confirmation mail.")
-      logger.error(err.message)
-      context.set_code(grpc.StatusCode.INTERNAL)
-      return demo_pb2.Empty()
-
-    try:
-      EmailService.send_email(self.client, email, confirmation)
-    except GoogleAPICallError as err:
-      context.set_details("An error occurred when sending the email.")
-      print(err.message)
-      context.set_code(grpc.StatusCode.INTERNAL)
-      return demo_pb2.Empty()
-
-    return demo_pb2.Empty()
-
-class DummyEmailService(BaseEmailService):
-  def SendOrderConfirmation(self, request, context):
-    logger.info('A request to send order confirmation email to {} has been received.'.format(request.email))
-    return demo_pb2.Empty()
-
-class HealthCheck():
-  def Check(self, request, context):
-    return health_pb2.HealthCheckResponse(
-      status=health_pb2.HealthCheckResponse.SERVING)
-
-def start(dummy_mode):
-  server = grpc.server(futures.ThreadPoolExecutor(max_workers=10),)
-  service = None
-  if dummy_mode:
-    service = DummyEmailService()
-  else:
-    raise Exception('non-dummy mode not implemented yet')
-
-  demo_pb2_grpc.add_EmailServiceServicer_to_server(service, server)
-  health_pb2_grpc.add_HealthServicer_to_server(service, server)
-
-  port = os.environ.get('PORT', "8080")
-  logger.info("listening on port: "+port)
-  server.add_insecure_port('[::]:'+port)
-  server.start()
-  try:
-    while True:
-      time.sleep(3600)
-  except KeyboardInterrupt:
-    server.stop(0)
-
-def initStackdriverProfiling():
-  project_id = None
-  try:
-    project_id = os.environ["GCP_PROJECT_ID"]
-  except KeyError:
-    # Environment variable not set
-    pass
-
-  # @TODO: Temporarily removed in https://github.com/GoogleCloudPlatform/microservices-demo/pull/3196
-  # for retry in range(1,4):
-  #   try:
-  #     if project_id:
-  #       googlecloudprofiler.start(service='email_server', service_version='1.0.0', verbose=0, project_id=project_id)
-  #     else:
-  #       googlecloudprofiler.start(service='email_server', service_version='1.0.0', verbose=0)
-  #     logger.info("Successfully started Stackdriver Profiler.")
-  #     return
-  #   except (BaseException) as exc:
-  #     logger.info("Unable to start Stackdriver Profiler Python agent. " + str(exc))
-  #     if (retry < 4):
-  #       logger.info("Sleeping %d to retry initializing Stackdriver Profiler"%(retry*10))
-  #       time.sleep (1)
-  #     else:
-  #       logger.warning("Could not initialize Stackdriver Profiler after retrying, giving up")
-  return
+logger = getJSONLogger("emailservice-server")
 
 
-if __name__ == '__main__':
-  logger.info('starting the email service in dummy mode.')
+class EmailService(demo_pb2_grpc.EmailServiceServicer, health_pb2_grpc.HealthServicer):
+    """Confirmations are logged, never sent."""
 
-  # Profiler
-  try:
-    if "DISABLE_PROFILER" in os.environ:
-      raise KeyError()
-    else:
-      logger.info("Profiler enabled.")
-      initStackdriverProfiling()
-  except KeyError:
-      logger.info("Profiler disabled.")
+    def __init__(self):
+        self.serving = True
 
-  # Tracing
-  try:
-    if os.environ["ENABLE_TRACING"] == "1":
-      otel_endpoint = os.getenv("COLLECTOR_SERVICE_ADDR", "localhost:4317")
-      trace.set_tracer_provider(TracerProvider())
-      trace.get_tracer_provider().add_span_processor(
-        BatchSpanProcessor(
-            OTLPSpanExporter(
-            endpoint = otel_endpoint,
-            insecure = True
-          )
+    def SendOrderConfirmation(
+        self,
+        request: demo_pb2.SendOrderConfirmationRequest,
+        context: grpc.ServicerContext,
+    ) -> demo_pb2.Empty:
+        # Never the email address: it is personal data.
+        logger.debug(
+            "A request to send the confirmation of order %s has been received.",
+            request.order.order_id,
         )
-      )
-    grpc_server_instrumentor = GrpcInstrumentorServer()
-    grpc_server_instrumentor.instrument()
+        return demo_pb2.Empty()
 
-  except (KeyError, DefaultCredentialsError):
-      logger.info("Tracing disabled.")
-  except Exception as e:
-      logger.warn(f"Exception on Cloud Trace setup: {traceback.format_exc()}, tracing disabled.") 
-  
-  start(dummy_mode = True)
+    def Check(
+        self, request: health_pb2.HealthCheckRequest, context: grpc.ServicerContext
+    ) -> health_pb2.HealthCheckResponse:
+        status = (
+            health_pb2.HealthCheckResponse.SERVING
+            if self.serving
+            else health_pb2.HealthCheckResponse.NOT_SERVING
+        )
+        return health_pb2.HealthCheckResponse(status=status)
+
+    def Watch(
+        self, request: health_pb2.HealthCheckRequest, context: grpc.ServicerContext
+    ) -> None:
+        context.abort(grpc.StatusCode.UNIMPLEMENTED, "Watch is not implemented")
+
+
+# Below the 30 s Kubernetes waits before sending SIGKILL.
+SHUTDOWN_GRACE_SECONDS = 10
+
+
+# Handlers mostly wait on I/O, so the GIL is not the bottleneck at this size.
+DEFAULT_MAX_WORKERS = 50
+# Beyond this queue, RESOURCE_EXHAUSTED at once instead of queueing past deadlines.
+MAX_CONCURRENT_RPCS_PER_WORKER = 2
+
+
+def max_workers() -> int | None:
+    """None if MAX_WORKERS is set but not a positive integer."""
+    value = os.environ.get("MAX_WORKERS") or str(DEFAULT_MAX_WORKERS)
+    try:
+        workers = int(value)
+    except ValueError:
+        return None
+    return workers if workers > 0 else None
+
+
+def new_server() -> grpc.Server:
+    """Exits with one JSON log line, and no traceback, on an invalid MAX_WORKERS."""
+    workers = max_workers()
+    if workers is None:
+        logger.error(
+            "invalid MAX_WORKERS %r: expected a positive integer",
+            os.environ["MAX_WORKERS"],
+        )
+        sys.exit(1)
+    logger.info("max workers: %d", workers)
+    return grpc.server(
+        futures.ThreadPoolExecutor(max_workers=workers),
+        maximum_concurrent_rpcs=workers * MAX_CONCURRENT_RPCS_PER_WORKER,
+    )
+
+
+def stop_on_signals(server: grpc.Server, service: EmailService) -> None:
+    """Needed: as PID 1 in the container, Python would otherwise ignore SIGTERM."""
+
+    def handle(signum: int, _frame: object) -> None:
+        logger.info("received %s, shutting down", signal.Signals(signum).name)
+        service.serving = False
+        server.stop(SHUTDOWN_GRACE_SECONDS)
+
+    signal.signal(signal.SIGTERM, handle)
+    signal.signal(signal.SIGINT, handle)
+
+
+def start() -> None:
+    port = os.environ.get("PORT", "8080")
+    server = new_server()
+    service = EmailService()
+
+    demo_pb2_grpc.add_EmailServiceServicer_to_server(service, server)
+    health_pb2_grpc.add_HealthServicer_to_server(service, server)
+
+    logger.info("listening on port: %s", port)
+    server.add_insecure_port(f"[::]:{port}")
+    server.start()
+    stop_on_signals(server, service)
+    server.wait_for_termination()
+
+
+if __name__ == "__main__":
+    exit_on_invalid_log_level(logger)
+    logger.info("starting the email service in dummy mode.")
+    start()

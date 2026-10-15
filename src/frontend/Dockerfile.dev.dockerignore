@@ -1,0 +1,5 @@
+coverage.out
+test-report.json
+Dockerfile*
+.dockerignore
+README.md

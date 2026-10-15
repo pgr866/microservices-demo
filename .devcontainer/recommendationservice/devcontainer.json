@@ -1,0 +1,30 @@
+{
+  "name": "recommendationservice",
+  "dockerComposeFile": "../../compose.yaml",
+  "service": "recommendationservice",
+  "runServices": ["recommendationservice"],
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=/usr/bin/docker,target=/usr/bin/docker,type=bind,readonly",
+    "source=/usr/libexec/docker/cli-plugins,target=/usr/libexec/docker/cli-plugins,type=bind,readonly",
+    "source=${localWorkspaceFolder},target=/workspace,type=bind"
+  ],
+  "remoteEnv": {
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_0": "git@github.com:"
+  },
+  "workspaceFolder": "/workspace/src/recommendationservice",
+  "overrideCommand": true,
+  "postStartCommand": ["watchmedo", "auto-restart", "--directory=.", "--pattern=*.py", "--recursive", "--", "python", "recommendation_server.py"],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "git.openRepositoryInParentFolders": "always",
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "ruff.importStrategy": "fromEnvironment"
+      },
+      "extensions": ["ms-python.python", "charliermarsh.ruff"]
+    }
+  }
+}
