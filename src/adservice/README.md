@@ -1,28 +1,96 @@
-# Ad Service
+# adservice
 
-The Ad service provides advertisement based on context keys. If no context keys are provided then it returns random ads.
+The Ad service provides advertisements based on context keys. If no context keys are provided, or none match a known category, it returns random ads.
 
-## Building locally
+## Build and run in production
 
-The Ad service uses gradlew to compile/install/distribute. Gradle wrapper is already part of the source code. To build Ad Service, run:
-
-```
-./gradlew installDist
-```
-It will create executable script src/adservice/build/install/hipstershop/bin/AdService
-
-### Upgrading gradle version
-If you need to upgrade the version of gradle then run
-
-```
-./gradlew wrapper --gradle-version <new-version>
+```bash
+docker build -t adservice:prod .
+docker run --rm -p 9555:9555 -e PORT=9555 adservice:prod
 ```
 
-## Building docker image
+## Development
 
-From `src/adservice/`, run:
+The recommended way is the service's devcontainer (`.devcontainer/adservice`): in VS Code, run *Dev Containers: Reopen in Container* and select `adservice`. It starts the service with hot reload and gives you every tool used in this document.
 
+The Docker commands of the following sections are stages of `Dockerfile.dev`; run every command from the service folder, `src/adservice`.
+
+Without the devcontainer, start it with hot reload using Compose **from the repo root**:
+
+```bash
+docker compose up adservice
 ```
-docker build ./
+
+## Manual test request
+
+Calls `GetAds` with a context key and returns the matching ads as JSON:
+
+```bash
+docker exec adservice grpcurl -plaintext -import-path /protos -proto demo.proto \
+  -d '{"context_keys": ["kitchen"]}' \
+  localhost:9555 hipstershop.AdService/GetAds
 ```
 
+## Configuration
+
+- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`; per-request logs are `debug`, and `compose.yaml` sets `debug` for development.
+- `PORT`: port to listen on (default `9555`).
+
+## Testing
+
+Use `dorny/test-reporter` action (`java-junit`, reading `build/test-results/test/*.xml`). **Blocking**: the CI fails if any test fails.
+
+```bash
+docker build -f Dockerfile.dev --target test --output type=local,dest=. .
+```
+
+## Coverage
+
+Use `madrapps/jacoco-report` action (JaCoCo XML, `build/reports/jacoco/test/jacocoTestReport.xml`). **Blocking**: the CI fails if coverage drops below the configured threshold.
+
+```bash
+docker build -f Dockerfile.dev --target coverage --output type=local,dest=. .
+```
+
+## Linting
+
+Use `reviewdog/action-setup` + `reviewdog -f=checkstyle` (Checkstyle XML, `build/reports/checkstyle/*.xml`) to annotate the PR. **Non-blocking**: informative only, never fails the CI.
+
+```bash
+docker build -f Dockerfile.dev --target lint .
+```
+
+## Formatting
+
+Formats the code in place with google-java-format. **Non-blocking**: informative only, never fails the CI.
+
+```bash
+docker build -f Dockerfile.dev --target format --output type=local,dest=. .
+docker build -f Dockerfile.dev --target format-check .
+```
+
+## Dependencies
+
+The command shows the resolved dependency tree and updates the Gradle wrapper; versions are declared at the top of `build.gradle`.
+
+```bash
+docker build -f Dockerfile.dev --target dependencies --output type=local,dest=. .
+```
+
+## Generated code
+
+`src/main/proto/demo.proto` is a copy of `protos/demo.proto` from which Gradle generates the Java code on every build. Refresh it with `genproto.sh` after changing the `.proto`:
+
+```bash
+docker build -f Dockerfile.dev --target codegen --build-context protos=../../protos --output type=local,dest=. .
+```
+
+## Vulnerability scan
+
+Builds the production image and scans it with Trivy, for vulnerabilities and secrets and for misconfigurations in its build instructions. CI runs it **non-blocking**; the CD pipeline runs it with `--severity CRITICAL --exit-code 1`, **blocking** the promotion to the hardened scenario.
+
+```bash
+docker build -t adservice:prod .
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.0 \
+  image --scanners vuln,secret --image-config-scanners misconfig adservice:prod
+```

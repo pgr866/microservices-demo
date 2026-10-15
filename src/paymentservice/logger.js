@@ -16,12 +16,37 @@
 
 const pino = require('pino');
 
-module.exports = pino({
-  name: 'paymentservice-server',
-  messageKey: 'message',
-  formatters: {
-    level (logLevelString, logLevelNum) {
-      return { severity: logLevelString }
-    }
+// The levels shared by all the services; pino also has trace and fatal.
+const LEVELS = ['debug', 'info', 'warn', 'error'];
+
+// An unknown LOG_LEVEL logs one JSON line and exits, so the service does not start.
+function createLogger(name, stream = pino.destination(1)) {
+  const level = (process.env.LOG_LEVEL || 'info').toLowerCase();
+  if (!LEVELS.includes(level)) {
+    stream.write(
+      `${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        severity: 'error',
+        message: `invalid LOG_LEVEL "${process.env.LOG_LEVEL}": must be one of ${LEVELS.join(', ')}`,
+        name,
+      })}\n`,
+    );
+    process.exit(1);
   }
-});
+  return pino(
+    {
+      name,
+      level,
+      messageKey: 'message',
+      timestamp: () => `,"timestamp":"${new Date().toISOString()}"`,
+      formatters: {
+        level(label) {
+          return { severity: label };
+        },
+      },
+    },
+    stream,
+  );
+}
+
+module.exports = createLogger;

@@ -12,33 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Define a default value so it's not empty if the builder fails to provide it
-ARG BUILDPLATFORM=linux/amd64
-
-FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS builder
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
-WORKDIR /src
-
-# restore dependencies
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:f2c872bcee949b7be9c490efd02b48a8a2fbf947cdf533f1c58525ec9d8170fd AS builder
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /go/bin/frontend .
 
-# Skaffold passes in debug-oriented compiler flags
-ARG SKAFFOLD_GO_GCFLAGS
-RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} CGO_ENABLED=0 go build -ldflags="-s -w" -gcflags="${SKAFFOLD_GO_GCFLAGS}" -o /go/bin/frontend .
-
-FROM gcr.io/distroless/static
-WORKDIR /src
-COPY --from=builder /go/bin/frontend /src/server
+FROM gcr.io/distroless/static:nonroot@sha256:516757106de35205efb70b91ba03f6f1298424a0678c603255cf2852a7000087
+WORKDIR /app
+COPY --from=builder /go/bin/frontend /app/frontend
 COPY ./templates ./templates
 COPY ./static ./static
-
-# Definition of this variable is used by 'skaffold debug' to identify a golang binary.
-# Default behavior - a failure prints a stack trace for the current goroutine.
-# See https://golang.org/pkg/runtime/
-ENV GOTRACEBACK=single
-
-EXPOSE 8080
-ENTRYPOINT ["/src/server"]
+USER 65532:65532
+EXPOSE 8082
+# The Kubernetes probes check health.
+HEALTHCHECK NONE
+ENTRYPOINT ["/app/frontend"]

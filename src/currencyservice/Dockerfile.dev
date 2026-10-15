@@ -1,0 +1,60 @@
+# One stage per README command, plus dev (hot reload).
+
+# As in production: same image, npm settings and apk upgrade.
+FROM node:24.22.0-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS node
+ENV NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false NPM_CONFIG_UPDATE_NOTIFIER=false
+RUN apk upgrade --no-cache
+WORKDIR /app
+
+FROM node AS base
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm,id=npm npm ci --prefer-offline
+
+FROM base AS source
+COPY . .
+
+FROM source AS test-run
+RUN npm test
+FROM scratch AS test
+COPY --from=test-run /app/reports/ /reports/
+
+FROM source AS coverage-run
+RUN npm run test:coverage
+FROM scratch AS coverage
+COPY --from=coverage-run /app/coverage/ /coverage/
+
+FROM source AS lint
+RUN npm run lint
+
+FROM source AS format-run
+RUN npm run format && mkdir /out && cp *.js /out
+FROM scratch AS format
+COPY --from=format-run /out/ /
+
+FROM source AS format-check
+RUN npx prettier --check "*.js"
+
+# From node, not base: npm ci fails on a package.json changed ahead of package-lock.json.
+FROM node AS dependencies-run
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm,id=npm npm install --prefer-offline \
+    && { npm outdated; npm audit; true; }
+FROM scratch AS dependencies
+COPY --from=dependencies-run /app/package-lock.json /
+
+FROM base AS codegen-run
+WORKDIR /repo/src/app
+COPY --from=protos . /repo/protos
+COPY . .
+RUN sh genproto.sh
+FROM scratch AS codegen
+COPY --from=codegen-run /repo/src/app/proto/ /proto/
+
+# gcompat: the devcontainer mounts the host's docker CLI, which is linked against glibc.
+FROM base AS dev
+COPY --from=fullstorydev/grpcurl:v1.9.3-alpine /bin/grpcurl /usr/local/bin/
+RUN apk add --no-cache git bash gcompat && chown -R node:node node_modules
+USER node
+# compose.yaml checks health.
+HEALTHCHECK NONE
+ENTRYPOINT ["npm", "run", "dev"]

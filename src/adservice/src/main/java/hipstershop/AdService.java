@@ -17,43 +17,40 @@
 package hipstershop;
 
 import com.google.common.collect.ImmutableListMultimap;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
 import hipstershop.Demo.Ad;
 import hipstershop.Demo.AdRequest;
 import hipstershop.Demo.AdResponse;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
-import io.grpc.StatusRuntimeException;
 import io.grpc.health.v1.HealthCheckResponse.ServingStatus;
-import io.grpc.services.*;
+import io.grpc.protobuf.services.HealthStatusManager;
 import io.grpc.stub.StreamObserver;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.core.config.Configurator;
 
 public final class AdService {
 
   private static final Logger logger = LogManager.getLogger(AdService.class);
 
-  @SuppressWarnings("FieldCanBeLocal")
-  private static int MAX_ADS_TO_SERVE = 2;
+  static final int MAX_ADS_TO_SERVE = 2;
+
+  /** Below the 30 s Kubernetes waits before SIGKILL. */
+  private static final long SHUTDOWN_TIMEOUT_SECONDS = 10;
 
   private Server server;
   private HealthStatusManager healthMgr;
 
-  private static final AdService service = new AdService();
-
-  private void start() throws IOException {
-    int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "9555"));
+  private void start(int port) throws IOException {
     healthMgr = new HealthStatusManager();
-
     server =
         ServerBuilder.forPort(port)
             .addService(new AdServiceImpl())
@@ -65,174 +62,121 @@ public final class AdService {
         .addShutdownHook(
             new Thread(
                 () -> {
-                  // Use stderr here since the logger may have been reset by its JVM shutdown hook.
-                  System.err.println(
-                      "*** shutting down gRPC ads server since JVM is shutting down");
-                  AdService.this.stop();
-                  System.err.println("*** server shut down");
+                  // log4j2.xml disables log4j's own shutdown hook, which could stop logging
+                  // before this one ends: logging is stopped here, once the server is down.
+                  logger.info("shutting down gRPC ads server since JVM is shutting down");
+                  stop();
+                  logger.info("server shut down");
+                  LogManager.shutdown();
                 }));
     healthMgr.setStatus("", ServingStatus.SERVING);
   }
 
   private void stop() {
-    if (server != null) {
-      healthMgr.clearStatus("");
-      server.shutdown();
-    }
+    stop(server, healthMgr, SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
   }
 
-  private static class AdServiceImpl extends hipstershop.AdServiceGrpc.AdServiceImplBase {
-
-    /**
-     * Retrieves ads based on context provided in the request {@code AdRequest}.
-     *
-     * @param req the request containing context.
-     * @param responseObserver the stream observer which gets notified with the value of {@code
-     *     AdResponse}
-     */
-    @Override
-    public void getAds(AdRequest req, StreamObserver<AdResponse> responseObserver) {
-      AdService service = AdService.getInstance();
-      try {
-        List<Ad> allAds = new ArrayList<>();
-        logger.info("received ad request (context_words=" + req.getContextKeysList() + ")");
-        if (req.getContextKeysCount() > 0) {
-          for (int i = 0; i < req.getContextKeysCount(); i++) {
-            Collection<Ad> ads = service.getAdsByCategory(req.getContextKeys(i));
-            allAds.addAll(ads);
-          }
-        } else {
-          allAds = service.getRandomAds();
-        }
-        if (allAds.isEmpty()) {
-          // Serve random ads.
-          allAds = service.getRandomAds();
-        }
-        AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
-        responseObserver.onNext(reply);
-        responseObserver.onCompleted();
-      } catch (StatusRuntimeException e) {
-        logger.log(Level.WARN, "GetAds Failed with status {}", e.getStatus());
-        responseObserver.onError(e);
+  /** Reports NOT_SERVING, drains in-flight calls for up to the timeout, then cuts the rest. */
+  static void stop(Server server, HealthStatusManager health, long timeout, TimeUnit unit) {
+    health.enterTerminalState();
+    server.shutdown();
+    try {
+      if (!server.awaitTermination(timeout, unit)) {
+        logger.warn("calls still in flight, cutting them");
+        server.shutdownNow();
       }
+    } catch (InterruptedException e) {
+      server.shutdownNow();
+      Thread.currentThread().interrupt();
     }
   }
 
-  private static final ImmutableListMultimap<String, Ad> adsMap = createAdsMap();
-
-  private Collection<Ad> getAdsByCategory(String category) {
-    return adsMap.get(category);
-  }
-
-  private static final Random random = new Random();
-
-  private List<Ad> getRandomAds() {
-    List<Ad> ads = new ArrayList<>(MAX_ADS_TO_SERVE);
-    Collection<Ad> allAds = adsMap.values();
-    for (int i = 0; i < MAX_ADS_TO_SERVE; i++) {
-      ads.add(Iterables.get(allAds, random.nextInt(allAds.size())));
-    }
-    return ads;
-  }
-
-  private static AdService getInstance() {
-    return service;
-  }
-
-  /** Await termination on the main thread since the grpc library uses daemon threads. */
+  /** The grpc library uses daemon threads, so the main thread has to wait. */
   private void blockUntilShutdown() throws InterruptedException {
-    if (server != null) {
+    if ((server != null) == true) {
       server.awaitTermination();
     }
   }
 
-  private static ImmutableListMultimap<String, Ad> createAdsMap() {
-    Ad hairdryer =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/2ZYFJ3GM2N")
-            .setText("Hairdryer for sale. 50% off.")
-            .build();
-    Ad tankTop =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/66VCHSJNUP")
-            .setText("Tank top for sale. 20% off.")
-            .build();
-    Ad candleHolder =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/0PUK6V6EV0")
-            .setText("Candle holder for sale. 30% off.")
-            .build();
-    Ad bambooGlassJar =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/9SIQT8TOJO")
-            .setText("Bamboo glass jar for sale. 10% off.")
-            .build();
-    Ad watch =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/1YMWWN1N4O")
-            .setText("Watch for sale. Buy one, get second kit for free")
-            .build();
-    Ad mug =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/6E92ZMYYFZ")
-            .setText("Mug for sale. Buy two, get third one for free")
-            .build();
-    Ad loafers =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/L9ECAV7KIM")
-            .setText("Loafers for sale. Buy one, get second one for free")
-            .build();
-    return ImmutableListMultimap.<String, Ad>builder()
-        .putAll("clothing", tankTop)
-        .putAll("accessories", watch)
-        .putAll("footwear", loafers)
-        .putAll("hair", hairdryer)
-        .putAll("decor", candleHolder)
-        .putAll("kitchen", bambooGlassJar, mug)
-        .build();
-  }
+  static final class AdServiceImpl extends AdServiceGrpc.AdServiceImplBase {
 
-  private static void initStats() {
-    if (System.getenv("DISABLE_STATS") != null) {
-      logger.info("Stats disabled.");
-      return;
+    private final Random random;
+
+    AdServiceImpl() {
+      this(new Random());
     }
-    logger.info("Stats enabled, but temporarily unavailable");
 
-    long sleepTime = 10; /* seconds */
-    int maxAttempts = 5;
-
-    // TODO(arbrown) Implement OpenTelemetry stats
-
-  }
-
-  private static void initTracing() {
-    if (System.getenv("DISABLE_TRACING") != null) {
-      logger.info("Tracing disabled.");
-      return;
+    /** Takes the source of the random fallback, so tests can make it repeatable. */
+    AdServiceImpl(Random random) {
+      this.random = random;
     }
-    logger.info("Tracing enabled but temporarily unavailable");
-    logger.info("See https://github.com/GoogleCloudPlatform/microservices-demo/issues/422 for more info.");
 
-    // TODO(arbrown) Implement OpenTelemetry tracing
-    
-    logger.info("Tracing enabled - Stackdriver exporter initialized.");
+    @Override
+    public void getAds(AdRequest req, StreamObserver<AdResponse> responseObserver) {
+      logger.debug("received ad request (context_words=" + req.getContextKeysList() + ")");
+      List<Ad> ads =
+          req.getContextKeysList().stream().flatMap(key -> ADS.get(key).stream()).toList();
+      if (ads.isEmpty()) {
+        ads = randomAds();
+      }
+      responseObserver.onNext(AdResponse.newBuilder().addAllAds(ads).build());
+      responseObserver.onCompleted();
+    }
+
+    private List<Ad> randomAds() {
+      List<Ad> all = new ArrayList<>(ADS.values());
+      Collections.shuffle(all, random);
+      return all.subList(0, MAX_ADS_TO_SERVE);
+    }
   }
 
-  /** Main launches the server from the command line. */
+  static final ImmutableListMultimap<String, Ad> ADS =
+      ImmutableListMultimap.<String, Ad>builder()
+          .put("clothing", ad("/product/66VCHSJNUP", "Tank top for sale. 20% off."))
+          .put(
+              "accessories",
+              ad("/product/1YMWWN1N4O", "Watch for sale. Buy one, get second kit for free"))
+          .put(
+              "footwear",
+              ad("/product/L9ECAV7KIM", "Loafers for sale. Buy one, get second one for free"))
+          .put("hair", ad("/product/2ZYFJ3GM2N", "Hairdryer for sale. 50% off."))
+          .put("decor", ad("/product/0PUK6V6EV0", "Candle holder for sale. 30% off."))
+          .putAll(
+              "kitchen",
+              ad("/product/9SIQT8TOJO", "Bamboo glass jar for sale. 10% off."),
+              ad("/product/6E92ZMYYFZ", "Mug for sale. Buy two, get third one for free"))
+          .build();
+
+  private static Ad ad(String redirectUrl, String text) {
+    return Ad.newBuilder().setRedirectUrl(redirectUrl).setText(text).build();
+  }
+
+  static Level logLevel(String value) {
+    if (value == null || value.isEmpty()) {
+      return Level.INFO;
+    }
+    // Not Level.getLevel: it also takes trace, fatal, off and all, which no service accepts.
+    return switch (value.toLowerCase(Locale.ROOT)) {
+      case "debug" -> Level.DEBUG;
+      case "info" -> Level.INFO;
+      case "warn" -> Level.WARN;
+      case "error" -> Level.ERROR;
+      default ->
+          throw new IllegalArgumentException(
+              "invalid LOG_LEVEL \"" + value + "\": want debug, info, warn or error");
+    };
+  }
+
   public static void main(String[] args) throws IOException, InterruptedException {
-
-    new Thread(
-            () -> {
-              initStats();
-              initTracing();
-            })
-        .start();
-
-    // Start the RPC server. You shouldn't see any output from gRPC before this.
+    try {
+      Configurator.setRootLevel(logLevel(System.getenv("LOG_LEVEL")));
+    } catch (IllegalArgumentException e) {
+      logger.fatal(e.getMessage());
+      System.exit(1);
+    }
     logger.info("AdService starting.");
-    final AdService service = AdService.getInstance();
-    service.start();
+    AdService service = new AdService();
+    service.start(Integer.parseInt(System.getenv().getOrDefault("PORT", "9555")));
     service.blockUntilShutdown();
   }
 }

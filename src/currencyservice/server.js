@@ -14,185 +14,175 @@
  * limitations under the License.
  */
 
-const pino = require('pino');
-const logger = pino({
-  name: 'currencyservice-server',
-  messageKey: 'message',
-  formatters: {
-    level (logLevelString, logLevelNum) {
-      return { severity: logLevelString }
-    }
-  }
-});
-
-if(process.env.DISABLE_PROFILER) {
-  logger.info("Profiler disabled.")
-}
-else {
-  logger.info("Profiler enabled.")
-  require('@google-cloud/profiler').start({
-    serviceContext: {
-      service: 'currencyservice',
-      version: '1.0.0'
-    }
-  });
-}
-
-// Register GRPC OTel Instrumentation for trace propagation
-// regardless of whether tracing is emitted.
-const { GrpcInstrumentation } = require('@opentelemetry/instrumentation-grpc');
-const { registerInstrumentations } = require('@opentelemetry/instrumentation');
-
-registerInstrumentations({
-  instrumentations: [new GrpcInstrumentation()]
-});
-
-if(process.env.ENABLE_TRACING == "1") {
-  logger.info("Tracing enabled.")
-
-  const { resourceFromAttributes } = require('@opentelemetry/resources');
-
-  const { ATTR_SERVICE_NAME } = require('@opentelemetry/semantic-conventions');
-
-  const opentelemetry = require('@opentelemetry/sdk-node');
-
-  const { OTLPTraceExporter } = require('@opentelemetry/exporter-otlp-grpc');
-
-  const collectorUrl = process.env.COLLECTOR_SERVICE_ADDR;
-  const traceExporter = new OTLPTraceExporter({url: collectorUrl});
-  const sdk = new opentelemetry.NodeSDK({
-    resource: resourceFromAttributes({
-      [ ATTR_SERVICE_NAME ]: process.env.OTEL_SERVICE_NAME || 'currencyservice',
-    }),
-    traceExporter: traceExporter,
-  });
-
-  sdk.start()
-}
-else {
-  logger.info("Tracing disabled.")
-}
-
-const path = require('path');
+const path = require('node:path');
 const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
+const logger = require('./logger')('currencyservice-server');
 
-const MAIN_PROTO_PATH = path.join(__dirname, './proto/demo.proto');
-const HEALTH_PROTO_PATH = path.join(__dirname, './proto/grpc/health/v1/health.proto');
+// Exchange rates against the euro, from European Central Bank public data.
+const ratesPerEuro = require('./data/currency_conversion.json');
 
-const PORT = process.env.PORT;
+// Below the 30 s Kubernetes waits before sending SIGKILL.
+const SHUTDOWN_TIMEOUT_MS = 10000;
 
-const shopProto = _loadProto(MAIN_PROTO_PATH).hipstershop;
-const healthProto = _loadProto(HEALTH_PROTO_PATH).grpc.health.v1;
+const NANOS_PER_UNIT = 1e9;
 
-/**
- * Helper function that loads a protobuf file.
- */
-function _loadProto (path) {
+function loadProto(file) {
   const packageDefinition = protoLoader.loadSync(
-    path,
+    path.join(__dirname, 'proto', file),
     {
       keepCase: true,
       longs: String,
       enums: String,
       defaults: true,
-      oneofs: true
-    }
+      oneofs: true,
+    },
   );
   return grpc.loadPackageDefinition(packageDefinition);
 }
 
-/**
- * Helper function that gets currency data from a stored JSON file
- * Uses public data from European Central Bank
- */
-function _getCurrencyData (callback) {
-  const data = require('./data/currency_conversion.json');
-  callback(data);
+const shopProto = loadProto('demo.proto').hipstershop;
+const healthProto = loadProto('grpc/health/v1/health.proto').grpc.health.v1;
+
+// Truncates towards zero so units and nanos keep the same sign (google.type.Money).
+function carry(amount) {
+  const nanos = amount.nanos + (amount.units % 1) * NANOS_PER_UNIT;
+  return {
+    units: Math.trunc(amount.units) + Math.trunc(nanos / NANOS_PER_UNIT),
+    nanos: nanos % NANOS_PER_UNIT,
+  };
 }
 
-/**
- * Helper function that handles decimal/fractional carrying
- */
-function _carry (amount) {
-  const fractionSize = Math.pow(10, 9);
-  amount.nanos += (amount.units % 1) * fractionSize;
-  amount.units = Math.floor(amount.units) + Math.floor(amount.nanos / fractionSize);
-  amount.nanos = amount.nanos % fractionSize;
-  return amount;
+function isSupported(code) {
+  // hasOwn, so that a prototype key such as "toString" is not a currency.
+  return Object.hasOwn(ratesPerEuro, code);
 }
 
-/**
- * Lists the supported currencies
- */
-function getSupportedCurrencies (call, callback) {
-  logger.info('Getting supported currencies...');
-  _getCurrencyData((data) => {
-    callback(null, {currency_codes: Object.keys(data)});
+// Through the euro, the base of the rates table.
+function convertAmount(from, toCode) {
+  const fromRate = Number(ratesPerEuro[from.currency_code]);
+  const euros = carry({
+    units: from.units / fromRate,
+    nanos: from.nanos / fromRate,
   });
+  euros.nanos = Math.round(euros.nanos);
+
+  const toRate = Number(ratesPerEuro[toCode]);
+  const result = carry({
+    units: euros.units * toRate,
+    nanos: euros.nanos * toRate,
+  });
+  return {
+    units: result.units,
+    nanos: Math.trunc(result.nanos),
+    currency_code: toCode,
+  };
 }
 
-/**
- * Converts between currencies
- */
-function convert (call, callback) {
+function getSupportedCurrencies(call, callback) {
+  logger.debug('Getting supported currencies...');
+  callback(null, { currency_codes: Object.keys(ratesPerEuro) });
+}
+
+function convert(call, callback) {
   try {
-    _getCurrencyData((data) => {
-      const request = call.request;
-
-      // Convert: from_currency --> EUR
-      const from = request.from;
-      const euros = _carry({
-        units: from.units / data[from.currency_code],
-        nanos: from.nanos / data[from.currency_code]
-      });
-
-      euros.nanos = Math.round(euros.nanos);
-
-      // Convert: EUR --> to_currency
-      const result = _carry({
-        units: euros.units * data[request.to_code],
-        nanos: euros.nanos * data[request.to_code]
-      });
-
-      result.units = Math.floor(result.units);
-      result.nanos = Math.floor(result.nanos);
-      result.currency_code = request.to_code;
-
-      logger.info(`conversion request successful`);
-      callback(null, result);
-    });
+    const { from, to_code: toCode } = call.request;
+    // An unknown code would turn the amount into NaN, which is sent as 0.
+    for (const code of [from?.currency_code ?? '', toCode ?? '']) {
+      if (!isSupported(code)) {
+        logger.warn(
+          `conversion request rejected: unsupported currency code "${code}"`,
+        );
+        callback({
+          code: grpc.status.INVALID_ARGUMENT,
+          message: `unsupported currency code "${code}"`,
+        });
+        return;
+      }
+    }
+    const result = convertAmount(from, toCode);
+    logger.debug('conversion request successful');
+    callback(null, result);
   } catch (err) {
-    logger.error(`conversion request failed: ${err}`);
-    callback(err.message);
+    // A bug: the detail stays in the logs.
+    logger.error(`conversion request failed: ${err.stack}`);
+    callback({ code: grpc.status.INTERNAL, message: 'internal error' });
   }
 }
 
-/**
- * Endpoint for health checks
- */
-function check (call, callback) {
-  callback(null, { status: 'SERVING' });
+// Set on SIGTERM so the health check stops traffic while in-flight calls finish.
+let shuttingDown = false;
+
+function check(call, callback) {
+  callback(null, { status: shuttingDown ? 'NOT_SERVING' : 'SERVING' });
 }
 
-/**
- * Starts an RPC server that receives requests for the
- * CurrencyConverter service at the sample server port
- */
-function main () {
-  logger.info(`Starting gRPC server on port ${PORT}...`);
+function createServer() {
   const server = new grpc.Server();
-  server.addService(shopProto.CurrencyService.service, {getSupportedCurrencies, convert});
-  server.addService(healthProto.Health.service, {check});
-
-  server.bindAsync(
-    `[::]:${PORT}`,
-    grpc.ServerCredentials.createInsecure(),
-    function() {
-      logger.info(`CurrencyService gRPC server started on port ${PORT}`);
-      server.start();
-    },
-   );
+  server.addService(shopProto.CurrencyService.service, {
+    getSupportedCurrencies,
+    convert,
+  });
+  server.addService(healthProto.Health.service, { check });
+  return server;
 }
 
-main();
+function gracefulShutdown(server, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      logger.warn(`calls still in flight after ${timeoutMs} ms, cutting them`);
+      server.forceShutdown();
+      resolve();
+    }, timeoutMs);
+    server.tryShutdown(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+// Needed: as PID 1 in the container, Node would otherwise ignore SIGTERM.
+function stopOnSignals(server) {
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    process.once(signal, async () => {
+      logger.info(`received ${signal}, shutting down`);
+      shuttingDown = true;
+      await gracefulShutdown(server);
+      process.exit(0);
+    });
+  }
+}
+
+// Exits if the port cannot be bound, instead of staying up without serving.
+function start(port) {
+  const server = createServer();
+  server.bindAsync(
+    `[::]:${port}`,
+    grpc.ServerCredentials.createInsecure(),
+    (err) => {
+      if (err) {
+        logger.fatal(`cannot listen on port ${port}: ${err.message}`);
+        process.exit(1);
+      }
+      logger.info(`CurrencyService gRPC server started on port ${port}`);
+    },
+  );
+  stopOnSignals(server);
+  return server;
+}
+
+module.exports = {
+  carry,
+  check,
+  convert,
+  createServer,
+  getSupportedCurrencies,
+  gracefulShutdown,
+  logger,
+  start,
+  stopOnSignals,
+};
+
+if (!!(require.main === module)) {
+  start(process.env.PORT || '7000');
+}

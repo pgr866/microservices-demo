@@ -1,0 +1,34 @@
+{
+  "name": "adservice",
+  "dockerComposeFile": "../../compose.yaml",
+  "initializeCommand": "echo DOCKER_GID=$(stat -c %g /var/run/docker.sock) > .env",
+  "service": "adservice",
+  "runServices": ["adservice"],
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=/usr/bin/docker,target=/usr/bin/docker,type=bind,readonly",
+    "source=/usr/libexec/docker/cli-plugins,target=/usr/libexec/docker/cli-plugins,type=bind,readonly",
+    "source=${localWorkspaceFolder},target=/workspace,type=bind",
+    "source=adservice_gradle_project,target=/workspace/src/adservice/.gradle,type=volume",
+    "source=adservice_build,target=/workspace/src/adservice/build,type=volume"
+  ],
+  "remoteEnv": {
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_0": "git@github.com:"
+  },
+  "workspaceFolder": "/workspace/src/adservice",
+  "overrideCommand": true,
+  "postStartCommand": ["watchexec", "--restart", "--poll", "2s", "--watch", "src", "--watch", "build.gradle", "--", "./gradlew", "run", "--no-daemon"],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "git.openRepositoryInParentFolders": "always",
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "java.checkstyle.configuration": "${workspaceFolder}/checkstyle.xml",
+        "java.checkstyle.version": "14.3.0"
+      },
+      "extensions": ["redhat.java", "vscjava.vscode-gradle", "vscjava.vscode-java-test", "shengchen.vscode-checkstyle"]
+    }
+  }
+}

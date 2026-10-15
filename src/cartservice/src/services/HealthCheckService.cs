@@ -12,30 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using System;
 using System.Threading.Tasks;
 using Grpc.Core;
 using Grpc.Health.V1;
+using Microsoft.Extensions.Hosting;
 using static Grpc.Health.V1.Health;
-using cartservice.cartstore;
 
-namespace cartservice.services
+namespace cartservice.services;
+
+/// <summary>
+/// SERVING regardless of Redis, so a Redis outage does not restart every pod; NOT_SERVING once
+/// shutdown starts, so the probes take the pod out while it drains its in-flight calls.
+/// </summary>
+public class HealthCheckService : HealthBase
 {
-    internal class HealthCheckService : HealthBase
+    private readonly IHostApplicationLifetime _lifetime;
+
+    public HealthCheckService(IHostApplicationLifetime lifetime)
     {
-        private ICartStore _cartStore { get; }
+        _lifetime = lifetime;
+    }
 
-        public HealthCheckService (ICartStore cartStore) 
+    public override Task<HealthCheckResponse> Check(HealthCheckRequest request, ServerCallContext context)
+    {
+        return Task.FromResult(new HealthCheckResponse
         {
-            _cartStore = cartStore;
-        }
-
-        public override Task<HealthCheckResponse> Check(HealthCheckRequest request, ServerCallContext context)
-        {
-            Console.WriteLine ("Checking CartService Health");
-            return Task.FromResult(new HealthCheckResponse {
-                Status = _cartStore.Ping() ? HealthCheckResponse.Types.ServingStatus.Serving : HealthCheckResponse.Types.ServingStatus.NotServing
-            });
-        }
+            Status = _lifetime.ApplicationStopping.IsCancellationRequested
+                ? HealthCheckResponse.Types.ServingStatus.NotServing
+                : HealthCheckResponse.Types.ServingStatus.Serving
+        });
     }
 }

@@ -1,0 +1,16 @@
+# The end-to-end tests that need no fault injection, as a Job against the shop of its namespace.
+# See README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs:
+      app: e2e
+    includeSelectors: false
+resources:
+  - job.yaml
+configMapGenerator:
+  - name: e2e-scripts
+    files:
+      - smoke.js
+      - cart-concurrent.js
+      - lib/shop.js

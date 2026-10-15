@@ -1,0 +1,291 @@
+# Local development only, with hot reload. The end-to-end tests use e2e/compose.yaml.
+
+# grpcurl also exits 0 on NOT_SERVING (shutting down), hence the grep.
+x-healthcheck: &healthcheck
+  test: ["CMD-SHELL", "grpcurl -plaintext -import-path /protos -proto grpc/health/v1/health.proto 127.0.0.1:$${PORT} grpc.health.v1.Health/Check | grep -q '\"SERVING\"'"]
+  start_period: 120s
+  start_interval: 1s
+  interval: 10s
+  timeout: 3s
+  retries: 3
+
+services:
+  productcatalogservice:
+    container_name: productcatalogservice
+    build:
+      context: ./src/productcatalogservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/productcatalogservice:/app
+      - productcatalogservice_cache:/cache
+    ports:
+      - "3550:3550"
+    environment:
+      PORT: "3550"
+      LOG_LEVEL: "debug"
+    healthcheck: *healthcheck
+
+  shippingservice:
+    container_name: shippingservice
+    build:
+      context: ./src/shippingservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/shippingservice:/app
+      - shippingservice_cache:/cache
+    ports:
+      - "50051:50051"
+    environment:
+      PORT: "50051"
+      LOG_LEVEL: "debug"
+    healthcheck: *healthcheck
+
+  paymentservice:
+    container_name: paymentservice
+    build:
+      context: ./src/paymentservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/paymentservice:/app
+      - paymentservice_node_modules:/app/node_modules
+    ports:
+      - "50052:50052"
+    environment:
+      PORT: "50052"
+      LOG_LEVEL: "debug"
+    healthcheck: *healthcheck
+
+  currencyservice:
+    container_name: currencyservice
+    build:
+      context: ./src/currencyservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/currencyservice:/app
+      - currencyservice_node_modules:/app/node_modules
+    ports:
+      - "7000:7000"
+    environment:
+      PORT: "7000"
+      LOG_LEVEL: "debug"
+    healthcheck: *healthcheck
+
+  emailservice:
+    container_name: emailservice
+    build:
+      context: ./src/emailservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/emailservice:/app
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      LOG_LEVEL: "debug"
+    healthcheck: *healthcheck
+
+  adservice:
+    container_name: adservice
+    build:
+      context: ./src/adservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/adservice:/app
+      - adservice_gradle_home:/home/dev/.gradle
+      - adservice_gradle_project:/app/.gradle
+      - adservice_build:/app/build
+    ports:
+      - "9555:9555"
+    environment:
+      PORT: "9555"
+      LOG_LEVEL: "debug"
+    healthcheck:
+      <<: *healthcheck
+      # The first start downloads Gradle and the libraries.
+      start_period: 300s
+
+  redis-cart:
+    container_name: redis-cart
+    image: redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /data:uid=1000,gid=1000
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "redis-cli -h 127.0.0.1 ping | grep -q PONG"]
+
+  cartservice:
+    container_name: cartservice
+    build:
+      context: ./src/cartservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/cartservice:/app
+      - cartservice_nuget_packages:/home/dev/.nuget/packages
+      - cartservice_obj:/app/src/obj
+      - cartservice_bin:/app/src/bin
+    ports:
+      - "7070:7070"
+    environment:
+      ASPNETCORE_HTTP_PORTS: "7070"
+      LOG_LEVEL: "debug"
+      REDIS_ADDR: "redis-cart:6379"
+    healthcheck:
+      <<: *healthcheck
+      # The port comes from ASPNETCORE_HTTP_PORTS, not PORT.
+      test: ["CMD-SHELL", "grpcurl -plaintext -import-path /protos -proto grpc/health/v1/health.proto 127.0.0.1:7070 grpc.health.v1.Health/Check | grep -q '\"SERVING\"'"]
+      # The first start restores the NuGet packages.
+      start_period: 300s
+    depends_on:
+      redis-cart:
+        condition: service_healthy
+
+  recommendationservice:
+    container_name: recommendationservice
+    build:
+      context: ./src/recommendationservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/recommendationservice:/app
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      LOG_LEVEL: "debug"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+    healthcheck: *healthcheck
+    depends_on:
+      productcatalogservice:
+        condition: service_healthy
+
+  checkoutservice:
+    container_name: checkoutservice
+    build:
+      context: ./src/checkoutservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/checkoutservice:/app
+      - checkoutservice_cache:/cache
+    ports:
+      - "5050:5050"
+    environment:
+      PORT: "5050"
+      LOG_LEVEL: "debug"
+      SHIPPING_SERVICE_ADDR: "shippingservice:50051"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+      CART_SERVICE_ADDR: "cartservice:7070"
+      CURRENCY_SERVICE_ADDR: "currencyservice:7000"
+      EMAIL_SERVICE_ADDR: "emailservice:8080"
+      PAYMENT_SERVICE_ADDR: "paymentservice:50052"
+    healthcheck: *healthcheck
+    depends_on:
+      shippingservice:
+        condition: service_healthy
+      productcatalogservice:
+        condition: service_healthy
+      cartservice:
+        condition: service_healthy
+      currencyservice:
+        condition: service_healthy
+      emailservice:
+        condition: service_healthy
+      paymentservice:
+        condition: service_healthy
+
+  frontend:
+    container_name: frontend
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/frontend:/app
+      - frontend_cache:/cache
+    ports:
+      - "8082:8082"
+    environment:
+      PORT: "8082"
+      LOG_LEVEL: "debug"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+      CURRENCY_SERVICE_ADDR: "currencyservice:7000"
+      CART_SERVICE_ADDR: "cartservice:7070"
+      RECOMMENDATION_SERVICE_ADDR: "recommendationservice:8081"
+      SHIPPING_SERVICE_ADDR: "shippingservice:50051"
+      CHECKOUT_SERVICE_ADDR: "checkoutservice:5050"
+      AD_SERVICE_ADDR: "adservice:9555"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8082/_healthz"]
+    depends_on:
+      productcatalogservice:
+        condition: service_healthy
+      currencyservice:
+        condition: service_healthy
+      cartservice:
+        condition: service_healthy
+      recommendationservice:
+        condition: service_healthy
+      shippingservice:
+        condition: service_healthy
+      checkoutservice:
+        condition: service_healthy
+      adservice:
+        condition: service_healthy
+
+volumes:
+  productcatalogservice_cache:
+  shippingservice_cache:
+  checkoutservice_cache:
+  frontend_cache:
+  paymentservice_node_modules:
+  currencyservice_node_modules:
+  adservice_gradle_home:
+  adservice_gradle_project:
+  adservice_build:
+  cartservice_nuget_packages:
+  cartservice_obj:
+  cartservice_bin:

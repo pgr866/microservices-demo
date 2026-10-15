@@ -1,0 +1,97 @@
+# emailservice
+
+The Email service logs a request to send an order confirmation email. It currently always runs in dummy mode (no email is actually sent).
+
+## Build and run in production
+
+```bash
+docker build -t emailservice:prod .
+docker run --rm -p 8080:8080 -e PORT=8080 emailservice:prod
+```
+
+## Development
+
+The recommended way is the service's devcontainer (`.devcontainer/emailservice`): in VS Code, run *Dev Containers: Reopen in Container* and select `emailservice`. It starts the service with hot reload and gives you every tool used in this document.
+
+The Docker commands of the following sections are stages of `Dockerfile.dev`; run every command from the service folder, `src/emailservice`.
+
+Without the devcontainer, start it with hot reload using Compose **from the repo root**:
+
+```bash
+docker compose up emailservice
+```
+
+## Manual test request
+
+Calls `SendOrderConfirmation` and returns an empty response as JSON:
+
+```bash
+docker exec emailservice grpcurl -plaintext -import-path /protos -proto demo.proto \
+  -d '{"email": "someone@example.com", "order": {"order_id": "123", "shipping_tracking_id": "TRACK-1"}}' \
+  localhost:8080 hipstershop.EmailService/SendOrderConfirmation
+```
+
+## Configuration
+
+- `LOG_LEVEL`: `debug`, `info` (default), `warn` or `error`; per-request logs are `debug`, and `compose.yaml` sets `debug` for development.
+- `PORT`: port to listen on (default `8080`).
+- `MAX_WORKERS`: threads serving calls at once (default `50`; must be a positive integer, or the service exits at startup with one JSON log line). Up to twice that many calls are admitted; any further call gets `RESOURCE_EXHAUSTED` at once instead of waiting in an unbounded queue until its deadline expires.
+
+## Testing
+
+Use `dorny/test-reporter` action (`java-junit`, via `pytest --junitxml`). **Blocking**: the CI fails if any test fails.
+
+```bash
+docker build -f Dockerfile.dev --target test --output type=local,dest=. .
+```
+
+## Coverage
+
+Use `irongut/CodeCoverageSummary` action (Cobertura XML, via `pytest-cov`). **Blocking**: the CI fails if coverage drops below the configured threshold.
+
+```bash
+docker build -f Dockerfile.dev --target coverage --output type=local,dest=. .
+```
+
+## Linting
+
+Use `astral-sh/ruff-action`, which runs the linter itself and annotates the PR natively (no separate report file needed). **Non-blocking**: informative only, never fails the CI.
+
+```bash
+docker build -f Dockerfile.dev --target lint .
+```
+
+## Formatting
+
+Formats the code in place with `ruff format`. **Non-blocking**: informative only, never fails the CI.
+
+```bash
+docker build -f Dockerfile.dev --target format --output type=local,dest=. .
+docker build -f Dockerfile.dev --target format-check .
+```
+
+## Dependencies
+
+Regenerates `requirements.txt` from `requirements.in` with the latest versions; the direct dependencies are pinned by hand in the `.in` files.
+
+```bash
+docker build -f Dockerfile.dev --target dependencies --output type=local,dest=. .
+```
+
+## Generated code
+
+`demo_pb2.py` and `demo_pb2_grpc.py` are generated from `protos/demo.proto` by `genproto.sh`. Regenerate them after changing the `.proto`:
+
+```bash
+docker build -f Dockerfile.dev --target codegen --build-context protos=../../protos --output type=local,dest=. .
+```
+
+## Vulnerability scan
+
+Builds the production image and scans it with Trivy, for vulnerabilities and secrets and for misconfigurations in its build instructions. CI runs it **non-blocking**; the CD pipeline runs it with `--severity CRITICAL --exit-code 1`, **blocking** the promotion to the hardened scenario.
+
+```bash
+docker build -t emailservice:prod .
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.76.0 \
+  image --scanners vuln,secret --image-config-scanners misconfig emailservice:prod
+```

@@ -12,44 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Define a default value so it's not empty if the builder fails to provide it
-ARG BUILDPLATFORM=linux/amd64
-
-FROM --platform=$BUILDPLATFORM python:3.14.7-alpine@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc AS base
+FROM python:3.15.0-alpine@sha256:2699b90f4d562a22e2dd076c82f964032f64814204bff36d271a54ba4cc2c7e2 AS base
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 FROM base AS builder
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-RUN apk update \
-    && apk add --no-cache g++ linux-headers \
-    && rm -rf /var/cache/apk/*
-
-# get packages
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip,id=pip \
+    pip install --root-user-action=ignore -r requirements.txt \
+    && pip uninstall -y --root-user-action=ignore pip \
+    && python -m compileall -q -f -j 0 --invalidation-mode unchecked-hash /usr/local/lib/python3.15/site-packages
 
 FROM base
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-RUN apk update \
-    && apk add --no-cache libstdc++ \
-    && rm -rf /var/cache/apk/*
-
-# get packages
-WORKDIR /recommendationservice
-
-# Grab packages from builder
-COPY --from=builder /usr/local/lib/python3.14/ /usr/local/lib/python3.14/
-
-# Add the application
+# apk upgrade: the security fixes published since the base image was built.
+RUN apk upgrade --no-cache \
+    && pip uninstall -y --root-user-action=ignore pip \
+    && addgroup -g 1000 recommendationservice \
+    && adduser -D -u 1000 -G recommendationservice recommendationservice
+WORKDIR /app
+COPY --from=builder /usr/local/lib/python3.15/site-packages/ /usr/local/lib/python3.15/site-packages/
 COPY . .
-
-# set listen port
-ENV PORT="8080"
-EXPOSE 8080
-
+RUN python -m compileall -q -f --invalidation-mode unchecked-hash .
+USER 1000:1000
+EXPOSE 8081
+# The Kubernetes probes check health.
+HEALTHCHECK NONE
 ENTRYPOINT ["python", "recommendation_server.py"]

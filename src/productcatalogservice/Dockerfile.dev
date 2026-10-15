@@ -1,0 +1,67 @@
+# One stage per README command, plus dev (hot reload).
+# Same Go image as the production build.
+FROM golang:1.27.3-alpine@sha256:f2c872bcee949b7be9c490efd02b48a8a2fbf947cdf533f1c58525ec9d8170fd AS tools
+ENV GOCACHE=/cache/go-build GOMODCACHE=/cache/go-mod GOBIN=/usr/local/bin
+WORKDIR /app
+COPY --from=golangci/golangci-lint:v2.15.0-alpine /usr/bin/golangci-lint /usr/local/bin/
+COPY --from=fullstorydev/grpcurl:v1.9.3-alpine /bin/grpcurl /usr/local/bin/
+RUN apk add --no-cache protoc \
+    && go install golang.org/x/vuln/cmd/govulncheck@v1.9.0 \
+    && go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12 \
+    && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2 \
+    && go clean -cache -modcache
+
+FROM tools AS source
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+FROM source AS test-run
+RUN --mount=type=cache,id=go-build,target=/cache/go-build go test -json ./... > /test-report.json
+FROM scratch AS test
+COPY --from=test-run /test-report.json /
+
+FROM source AS coverage-run
+RUN --mount=type=cache,id=go-build,target=/cache/go-build go test -coverprofile=/coverage.out $(go list ./... | grep -v /genproto) && go tool cover -func=/coverage.out
+FROM scratch AS coverage
+COPY --from=coverage-run /coverage.out /
+
+FROM source AS lint
+RUN --mount=type=cache,id=go-build,target=/cache/go-build --mount=type=cache,id=golangci-lint,target=/root/.cache/golangci-lint golangci-lint run ./...
+
+FROM source AS vulncheck
+RUN --mount=type=cache,id=go-build,target=/cache/go-build govulncheck ./...
+
+FROM source AS format-run
+RUN gofmt -l -w . && mkdir /out && find . -name '*.go' -not -path './genproto/*' | xargs -I{} cp --parents {} /out
+FROM scratch AS format
+COPY --from=format-run /out/ /
+
+FROM source AS format-check
+RUN files=$(gofmt -l .) && [ -z "$files" ] || { echo "$files"; exit 1; }
+
+FROM source AS dependencies-run
+RUN go get -u ./... && go mod tidy
+FROM scratch AS dependencies
+COPY --from=dependencies-run /app/go.mod /app/go.sum /
+
+# genproto.sh reads the protos from ../../protos, so the service sits at the same depth as in the repo.
+FROM tools AS codegen-run
+WORKDIR /repo/src/app
+COPY --from=protos . /repo/protos
+COPY . .
+RUN sh genproto.sh
+FROM scratch AS codegen
+COPY --from=codegen-run /repo/src/app/genproto/ /genproto/
+
+# gcompat: the devcontainer mounts the host's docker CLI, which is linked against glibc.
+FROM tools AS dev
+RUN apk add --no-cache git bash gcompat \
+    && go install github.com/air-verse/air@v1.67.4 \
+    && go clean -cache -modcache \
+    && adduser -D -u 1000 dev \
+    && mkdir -p /cache && chown -R dev:dev /cache
+USER dev
+# compose.yaml checks health.
+HEALTHCHECK NONE
+ENTRYPOINT ["air", "-tmp_dir", "/tmp/air", "-build.cmd", "go build -o /tmp/air/main .", "-build.entrypoint", "/tmp/air/main"]

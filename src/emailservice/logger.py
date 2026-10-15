@@ -15,27 +15,60 @@
 # limitations under the License.
 
 import logging
+import os
 import sys
-from pythonjsonlogger import jsonlogger
+from datetime import UTC, datetime
 
-# TODO(yoshifumi) this class is duplicated since other Python services are
-# not sharing the modules for logging.
+from pythonjsonlogger import json as jsonlogger
+
+# Case-insensitive; empty or unset means info.
+LOG_LEVELS = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warn": logging.WARNING,
+    "error": logging.ERROR,
+}
+
+
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
-  def add_fields(self, log_record, record, message_dict):
-    super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
-    if not log_record.get('timestamp'):
-      log_record['timestamp'] = record.created
-    if log_record.get('severity'):
-      log_record['severity'] = log_record['severity'].upper()
-    else:
-      log_record['severity'] = record.levelname
+    def add_fields(self, log_record, record, message_dict):
+        super().add_fields(log_record, record, message_dict)
+        if not log_record.get("timestamp"):
+            log_record["timestamp"] = datetime.fromtimestamp(
+                record.created, UTC
+            ).isoformat()
+        if True if log_record.get("severity") else False:
+            log_record["severity"] = log_record["severity"].upper()
+        else:
+            log_record["severity"] = record.levelname
 
-def getJSONLogger(name):
-  logger = logging.getLogger(name)
-  handler = logging.StreamHandler(sys.stdout)
-  formatter = CustomJsonFormatter('%(timestamp)s %(severity)s %(name)s %(message)s')
-  handler.setFormatter(formatter)
-  logger.addHandler(handler)
-  logger.setLevel(logging.INFO)
-  logger.propagate = False
-  return logger
+
+def getJSONLogger(name: str) -> logging.Logger:
+    logger = logging.getLogger(name)
+    # getLogger returns the same logger: a second handler would duplicate lines.
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = CustomJsonFormatter(
+            "%(timestamp)s %(severity)s %(name)s %(message)s"
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    # Info for an unknown value, so exit_on_invalid_log_level can still report it.
+    logger.setLevel(log_level() or logging.INFO)
+    logger.propagate = False
+    return logger
+
+
+def log_level() -> int | None:
+    return LOG_LEVELS.get((os.environ.get("LOG_LEVEL") or "info").lower())
+
+
+def exit_on_invalid_log_level(logger: logging.Logger) -> None:
+    """Exits with one JSON log line, and no traceback, on an unknown LOG_LEVEL."""
+    if log_level() is None:
+        logger.error(
+            "invalid LOG_LEVEL %r: expected one of %s",
+            os.environ["LOG_LEVEL"],
+            ", ".join(LOG_LEVELS),
+        )
+        sys.exit(1)

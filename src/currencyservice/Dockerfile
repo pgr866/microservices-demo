@@ -12,34 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Define a default value so it's not empty if the builder fails to provide it
-ARG BUILDPLATFORM=linux/amd64
-
-FROM --platform=$BUILDPLATFORM node:24.20.0-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS builder
-
-# Some packages (e.g. @google-cloud/profiler) require additional
-# deps for post-install scripts
-RUN apk add --update --no-cache \
-    python3 \
-    make \
-    g++
-
-WORKDIR /usr/src/app
-
+FROM node:24.22.0-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS builder
+ENV NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false NPM_CONFIG_UPDATE_NOTIFIER=false
+WORKDIR /app
 COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm,id=npm \
+    npm ci --omit=dev --prefer-offline
 
-RUN npm install --only=production
-
-FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
-
-RUN apk add --no-cache nodejs
-
-WORKDIR /usr/src/app
-
-COPY --from=builder /usr/src/app/node_modules ./node_modules
-
+FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+# apk upgrade: the security fixes published since the base image was built.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache libstdc++ && \
+    addgroup -g 1000 nodejs && \
+    adduser -D -u 1000 -G nodejs nodejs
+COPY --from=builder /usr/local/bin/node /usr/local/bin/node
+WORKDIR /app
+COPY --from=builder /app/node_modules ./node_modules
 COPY . .
-
+USER 1000:1000
 EXPOSE 7000
-
-ENTRYPOINT [ "node", "server.js" ]
+# The Kubernetes probes check health.
+HEALTHCHECK NONE
+ENTRYPOINT ["node", "server.js"]

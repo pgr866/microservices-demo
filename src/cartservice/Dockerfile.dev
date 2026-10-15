@@ -1,0 +1,54 @@
+# One stage per README command, plus dev (hot reload).
+
+# As in production: same SDK image, and apk upgrade.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.402-alpine3.24@sha256:230c3fbae0ceedc70bca04eed2bfb5694e8b248cadbb81010f41b7a993601f55 AS base
+RUN apk upgrade --no-cache && apk add --no-cache gcompat
+WORKDIR /app
+
+FROM base AS deps
+COPY src/cartservice.csproj src/
+COPY tests/cartservice.tests.csproj tests/
+# Own layer: keeps obj/project.assets.json, so later restores are no-ops until a csproj changes.
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet restore tests/cartservice.tests.csproj
+
+FROM deps AS source
+COPY . .
+
+FROM source AS test-run
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet test tests/cartservice.tests.csproj --logger "trx;LogFileName=test-results.trx"
+FROM scratch AS test
+COPY --from=test-run /app/tests/TestResults/ /tests/TestResults/
+
+FROM source AS coverage-run
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet test tests/cartservice.tests.csproj --collect:"XPlat Code Coverage" --settings tests/coverlet.runsettings
+FROM scratch AS coverage
+COPY --from=coverage-run /app/tests/TestResults/ /tests/TestResults/
+
+FROM source AS lint
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet format --verify-no-changes
+
+FROM source AS format-run
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet format && mkdir /out \
+    && find src tests -name '*.cs' -not -path '*/obj/*' -not -path '*/bin/*' | xargs -I{} cp --parents {} /out
+FROM scratch AS format
+COPY --from=format-run /out/ /
+
+FROM source AS dependencies
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages dotnet list cartservice.slnx package --outdated \
+    && dotnet list cartservice.slnx package --vulnerable --include-transitive \
+    && dotnet list cartservice.slnx package --deprecated
+
+FROM base AS dev
+COPY --from=fullstorydev/grpcurl:v1.9.3-alpine /bin/grpcurl /usr/local/bin/
+# Mount points of the named volumes, pre-created so that the volumes belong to dev.
+RUN apk add --no-cache watchexec git bash \
+    && adduser -D -u 1000 dev \
+    && install -d -o dev -g dev /home/dev/.nuget /home/dev/.nuget/packages src src/obj src/bin \
+       /workspace/src/cartservice/src/obj /workspace/src/cartservice/src/bin
+# As in production (ASP.NET Core's default is 8080).
+ENV ASPNETCORE_HTTP_PORTS=7070
+USER dev
+# compose.yaml checks health.
+HEALTHCHECK NONE
+# Not dotnet watch: it ignores SIGTERM and SIGINT, so every stop would wait for the SIGKILL.
+ENTRYPOINT ["watchexec", "--restart", "--watch", "src", "--ignore", "src/obj/**", "--ignore", "src/bin/**", "--exts", "cs,csproj,json,proto", "--", "dotnet", "run", "--project", "src/cartservice.csproj"]

@@ -1,0 +1,6 @@
+node_modules/
+coverage/
+reports/
+Dockerfile*
+.dockerignore
+README.md
