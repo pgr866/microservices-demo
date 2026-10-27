@@ -1,375 +1,378 @@
 # TFM — Memoria de contexto y hoja de ruta
 
-> Documento único de contexto para retomar el trabajo. Recoge las decisiones vigentes y su motivo, para no volver a discutirlas sin un motivo nuevo. El detalle histórico de cada cambio está en el historial de git.
+> Documento único de contexto para retomar el trabajo. Recoge las decisiones vigentes y su motivo, para no volver a discutirlas sin un motivo nuevo. El detalle histórico está en git.
 
 ## 0. Resumen del proyecto
 
-**Título:** Evaluación de resiliencia y seguridad en orquestación de microservicios — Un análisis basado en métricas de rendimiento y aislamiento en Kubernetes.
+**Título:** Evaluación de medidas de seguridad y resiliencia en la orquestación de microservicios con Kubernetes: un análisis experimental de rendimiento, aislamiento y recuperación ante fallos.
 
-**Proyecto software:** fork de [Online Boutique de Google](https://github.com/GoogleCloudPlatform/microservices-demo): 10 microservicios en 5 lenguajes (el `loadgenerator` original se sustituye por k6).
+**Objetivo personal: aprender Kubernetes a fondo.** El objetivo académico es el del título, y el experimento es el vehículo del aprendizaje: cada concepto se estudia, se rompe a propósito y se mide.
 
-**Experimento central:** test de carga con k6 e inyección de fallos en dos escenarios desplegados por los pipelines:
-- **Escenario A (Estándar):** sin límites de recursos ni políticas de red.
-- **Escenario B (Blindado):** con todas las restricciones de seguridad y resiliencia.
+**Sistema bajo prueba:** fork de [Online Boutique de Google](https://github.com/GoogleCloudPlatform/microservices-demo): 10 microservicios en 5 lenguajes (el `loadgenerator` original se sustituye por k6).
 
-**Resultado esperado:** comparar en Grafana el coste en consumo/latencia de la seguridad frente a la velocidad de recuperación (MTTR).
+**Stack:** Azure (AKS), Terraform, GitHub Actions (OIDC), Argo CD, Kubernetes + Cilium, Istio, `kind`, Kustomize, Kyverno, Chaos Mesh, Prometheus, Grafana, k6, Trivy, cosign.
 
-**Stack:** Azure (AKS), Terraform, GitHub Actions, Argo CD, Kubernetes, Prometheus, Grafana, k6.
+**Restricciones:** 3 meses a dedicación casi completa y **100 € de Azure**. El 90 % del trabajo va en `kind` (gratis); Azure solo para validar la infraestructura y para la campaña de medida.
 
-## Estado actual
+### Principios de trabajo
 
-- ✅ Tareas 1-3: fork limpio y los 10 microservicios validados en local (tests, linter, formato, Dockerfiles endurecidos, entorno de desarrollo).
-- ✅ Tests de punta a punta en `e2e/` (adelanta parte de las Tareas 6, 10 y 12).
-- ⏳ Tareas 4-14: diseñadas, sin implementar.
+1. **Primero a mano, luego con herramientas:** cada concepto de Kubernetes se hace una vez con `kubectl` y YAML crudo antes de usar Kustomize, Kyverno o Argo CD.
+2. **Aprender rompiendo:** cada tema acaba en un fallo provocado y diagnosticado (catálogo de fallos, Tarea 12).
+3. **Cada tema se escribe:** una nota corta en `docs/notas/` (qué es, cómo falla, cómo se mide). Es la base de la memoria y material de portfolio.
+4. **CI, CD y Terraform no se recortan.** Crecen en paralelo con cada fase de Kubernetes, no en un bloque aparte.
+5. **Decisiones en ADRs** (`docs/adr/`), con el motivo.
+
+---
+
+## 1. Diseño experimental
+
+### Factores (diseño 2×2)
+
+| | Resiliencia OFF | Resiliencia ON |
+|---|---|---|
+| **Seguridad OFF** | **A** base | **C** resiliencia |
+| **Seguridad ON** | **B** seguridad | **D** ambas |
+
+Cada factor es un *component* de Kustomize; cada escenario, un overlay con su namespace (`boutique-a`, `-b`, `-c`, `-d`).
+
+- **Service mesh (Istio) en los 4 escenarios** (petición del tutor): los 4 pagan el mismo coste de proxies y lo que cambia es su configuración según el factor. Si estuviera solo en C y D, su latencia se confundiría con el efecto de la resiliencia; como tercer factor (2×2×2) duplicaría la campaña. Configuración común: **reintentos desactivados explícitamente** (Istio reintenta 2 veces por defecto y ocultaría los fallos inyectados) y reparto por petición (con gRPC, sin mesh, `frontend` mantiene una sola conexión HTTP/2 por servicio y puede mandarlo todo a una réplica).
+- **Seguridad:** Pod Security Admission `restricted`; NetworkPolicy con deny-all más reglas permitidas; requests y limits por servicio, `ResourceQuota` y `LimitRange`; `seccompProfile: RuntimeDefault`; `automountServiceAccountToken: false`; Kyverno (pocas políticas, incluida `verifyImages`) limitado a los namespaces con seguridad ON; mTLS `STRICT` y `AuthorizationPolicy` por identidad del mesh (la NetworkPolicy aísla por IP y puerto; esta, por identidad del servicio). El cifrado no es lo que distingue los escenarios: Istio cifra por defecto el tráfico entre pods del mesh en los 4 (modo `PERMISSIVE`); `STRICT` añade rechazar el texto plano de quien no está en el mesh.
+- **Resiliencia:** 2 réplicas por servicio sin estado (`redis-cart` se queda en 1: con 2 se partirían los carritos); PDB; `topologySpreadConstraints`; probes revisadas; `preStop` + `terminationGracePeriodSeconds`; **circuit breaker** del mesh (`DestinationRule` con `outlierDetection` y `connectionPool`). Kubernetes solo saca un pod del tráfico cuando falla su readiness probe; el circuit breaker expulsa la réplica que da errores en peticiones reales aunque siga `Ready` (*fallo gris*).
+- **En A y C la app va sin requests ni limits.** El pod ya no es BestEffort, porque el sidecar lleva sus propios recursos: se fijan iguales en los 4 escenarios, así que no distinguen un factor de otro; lo que importa para H3 es que el contenedor de la app no tenga límite. `kustomize/base` los trae en todos los Deployments (es el original, aún sin tocar), así que pasan de la base al componente de seguridad con sus valores por servicio; los valores por defecto del `LimitRange` no bastan (p. ej. para la JVM de `adservice`). Sin eso, el experimento de contención de recursos no tiene sentido.
+- **Mismo SHA de imagen en los 4 escenarios** durante todo el experimento.
+- **El `ResourceQuota` es idéntico en B y D**, dimensionado para 2 réplicas y con los proxies del mesh incluidos (cuentan dentro de la quota).
+
+### Hipótesis
+
+- **H1:** la seguridad (red, mTLS `STRICT`, limits y quotas, admisión) no degrada de forma relevante latencia (p95) ni consumo. Se contrasta con un test de equivalencia (TOST, con el margen fijado antes de medir, p. ej. ±10 % del p95) o tamaño del efecto con IC; un resultado nulo es válido. Los limits de CPU pueden provocar *throttling*: si H1 se rechaza, también es un resultado.
+- **H2:** la seguridad bloquea el 100 % del movimiento lateral (un pod no autorizado llega a `redis-cart` en A y C, no en B y D; lo frenan la NetworkPolicy y la `AuthorizationPolicy`).
+- **H3:** limits y quotas mitigan la interferencia por contención de recursos (*noisy neighbor*): la degradación del p95 del usuario testigo es mucho menor en B y D que en A y C.
+- **H4:** (a) la resiliencia reduce el MTTR y los errores durante el fallo; (b) el efecto de la seguridad sobre el MTTR **se mide, no se da por nulo** (los webhooks de admisión y `verifyImages` añaden latencia al recrear pods); (c) el circuit breaker reduce los errores durante un fallo gris (E2b, C frente a C′).
+
+### Experimentos
+
+- **E1, rendimiento:** carga escalonada sin fallos. **Variante A0** (A sin mesh, solo en E1): como el mesh está en los 4, sin ella no se sabe cuánto cuesta el propio mesh, y es lo primero que preguntará el tribunal.
+- **E2, fallo:** `PodChaos` con kill inmediato (`grace-period=0`) sobre un servicio **sin estado y en el camino caliente** (`currencyservice` o `productcatalogservice`; fijarlo antes de medir) mientras corre el usuario testigo. `redis-cart` no sirve de objetivo (SPOF en todos los escenarios): queda como fallo cualitativo aparte.
+- **E2b, fallo gris:** se degrada **una sola** réplica del mismo servicio objetivo sin que deje de estar `Ready` (`NetworkChaos` de Chaos Mesh sobre ese pod, **limitado al tráfico de sus llamantes**: si también afecta a las probes del kubelet, el pod deja de estar `Ready` y ya no es un fallo gris). **El fallo tiene que ser uno que Envoy cuente como error** (conexión rechazada o cortada, p. ej. partición o pérdida alta), no solo un retraso: si la petición la corta el plazo de `frontend`, Envoy ve una cancelación del cliente y puede no contarla para expulsar la réplica. Se verifica en el piloto que la expulsión ocurre. Sin circuit breaker, parte de las peticiones siguen yendo a la réplica mala; con él, se expulsa. E2 mide la recuperación de Kubernetes; E2b, la del mesh. **Variante obligatoria C′** (C sin circuit breaker, solo en E2b): sin ella, H4c no se puede contrastar, porque A y B frente a C y D también difieren en el número de réplicas. H4c se contrasta con C frente a C′; A, B y D se miden igual para el análisis del factorial.
+- **E3, aislamiento:** (i) pod no autorizado que intenta llegar a `redis-cart`; (ii) pod `stress-ng` colocado en el mismo nodo que la víctima. El manifiesto es idéntico en los 4 escenarios; los límites los pone el `LimitRange` donde exista. Sus imágenes salen de ACR firmadas y el manifiesto cumple PSA `restricted`, para que en B y D no los frene la admisión y se mida solo la red o los límites.
+
+### Metodología
+
+- **Carga:** k6 con `constant-arrival-rate` (no VUs fijos: con VUs fijos, cuando el sistema cae la latencia se subestima, *coordinated omission*), calibrada al ~60 % de la saturación del escenario A y con la misma tasa en los 4. La saturación se calibra en AKS, no en `kind`.
+- **Repeticiones:** N = 5 por escenario y experimento (3 + 2 entre las dos sesiones), con calentamiento y duración fija; orden alterno; se redespliega el namespace entre ejecuciones (resetea Redis).
+- **Análisis:** efectos principales de cada factor y su interacción con un ANOVA de rangos alineados (ART, no paramétrico), con la sesión como bloque; comparaciones por pares con Mann-Whitney, con corrección de Holm por comparaciones múltiples; medianas e IC. Con N = 5 la potencia es baja: se informa siempre del tamaño del efecto con su IC, y un TOST no concluyente no se presenta como equivalencia. En un notebook de Python.
+- **Bloqueo por sesión:** las dos sesiones de campaña repiten **los 4 escenarios** cada una (las VMs cambian de un día a otro; si no, sesión y escenario se confunden).
+- **MTTR doble:** hasta pod `Ready` (kube-state-metrics) y hasta que el éxito del usuario testigo vuelve a la línea base (k6).
+- **Autoescalado fuera del factorial:** nodos fijos y Cluster Autoscaler apagado durante la campaña; el HPA es una demo aparte.
+- **Sin interferencia de medida:** node pools separados (`sistema`: Argo CD, Prometheus, Grafana, Chaos Mesh; `carga`: k6; `app`: el sistema bajo prueba, con taints) y los otros 3 namespaces escalados a 0 mientras se mide uno.
+- **Fijado antes de medir e igual en los 4:** `REQUEST_TIMEOUT`; `MAX_WORKERS` de los servicios Python; llamadas en paralelo por producto (máx. 10, `errgroup`); sin reintentos automáticos, tampoco en el mesh (ocultarían fallos inyectados); parámetros del circuit breaker; servicio objetivo; tipo de fallo (kill inmediato, ver E2; un `delete` normal sería otro experimento, porque con el apagado ordenado el pod termina antes sus peticiones en curso).
+- **k6 corre dentro del clúster**, en su propio namespace y en el pool `carga`, con recursos fijos e iguales para los 4 escenarios (dentro de B o D le aplicarían el `LimitRange` y la quota). Ataca al `ClusterIP` de `frontend` (`frontend.<namespace>.svc.cluster.local`), nunca por la entrada pública (añadiría latencia del Gateway, DNS y TLS); las NetworkPolicy de B y D admiten su tráfico. **El namespace de k6 entra en el mesh** (con sidecar, igual en los 4): si no, con mTLS `STRICT` en B y D sus peticiones en texto plano se rechazarían. Lo mismo aplica al Job de `e2e/` y al Gateway, que llegan a `frontend` desde fuera de su namespace.
+- **Imágenes ya descargadas** en los nodos de `app` antes de medir, incluidas las del mesh (p. ej. con un DaemonSet de *pre-pull*), para que el MTTR no incluya la descarga.
+
+---
+
+## 2. Estado actual y calendario
+
+- ✅ **Tareas 1-3:** fork limpio y los 10 microservicios validados en local (tests, linter, formato, Dockerfiles endurecidos, entorno de desarrollo). Código de servicios **congelado**: no se añade nada nuevo.
+- ✅ **Tests de punta a punta en `e2e/`** (falta engancharlos al CI).
+- ⏳ **Tareas 4-14:** diseñadas, sin implementar.
 - **Rama de trabajo:** `refactor/local-microservice-validation`; `main` no se toca hasta fusionar por PR.
-- **Orden:** primero todo lo que no cuesta dinero (Tareas 4-6: `kind`, Terraform sin `apply`, CI). El primer `terraform apply` contra Azure (Tareas 10-11) va al final.
+- **Orden:** todo lo que no cuesta dinero primero (`kind`, CI, `terraform plan`). El primer `terraform apply` va en la semana 7; antes solo se crean, con `az`, el almacenamiento del estado y la identidad OIDC (Tarea 5).
+
+| Sem. | Kubernetes y experimento | CI / CD / Terraform en paralelo |
+|---|---|---|
+| 1 | Hipótesis y ADRs, repaso del modelo, `kind` multinodo con Cilium. Visto bueno del tutor | Auditar el CI heredado y diseñar el nuevo. Terraform: estructura de módulos y bootstrap (estado e identidad OIDC) |
+| 2 | Workloads, probes y ciclo de vida a mano. Overlay A | CI track A (tests, cobertura, linters) en matriz |
+| 3 | Recursos, QoS, throttling, OOM. Overlay B | CI track A completo (caché de BuildKit, `go test -race`) |
+| 4 | Scheduling, PDB, `drain`. Factor resiliencia (C y D). Reproducir sin mesh la réplica desequilibrada de gRPC y el fallo gris | CI track B (Trivy, `govulncheck`, e2e, `kustomize` + `kube-linter`, `actionlint`) |
+| 5 | Red: CoreDNS, NetworkPolicy, Cilium. Istio (sidecar) en `kind` con Cilium configurado como AKS, circuit breaker | Terraform: VNet, AKS con 3 pools, ACR, OIDC. `fmt`, `validate`, `plan`, tflint, checkov, `trivy config` |
+| 6 | Seguridad: RBAC, PSA, Kyverno, mTLS `STRICT` y `AuthorizationPolicy`. Prometheus y Grafana en `kind` | Pipeline de Infra: levantar y destruir el entorno bajo demanda |
+| 7 | **Sesión de Azure 1:** apply, comprobar métricas de Cilium, el mesh sobre el Cilium de AKS y la observabilidad, smoke, destroy | Pipeline de CD: ACR, tag por SHA, Trivy, `cosign` y SBOM, gate manual |
+| 8 | Argo CD con `ApplicationSet` de 4 apps; Chaos Mesh, scripts de k6, piloto en `kind` (E2b y C′ incluidos); métricas personalizadas cerradas; `verifyImages` en `kind` (registro local) | Tramo GitOps del CD en `kind` (Argo CD tira de git; los runners de GitHub no llegan a un `kind` local) |
+| 9 | **Sesión de Azure 2:** CD de extremo a extremo, Gateway API + cert-manager + TLS, calibración de carga en AKS | Pipeline de Experimento (`workflow_dispatch`) |
+| 10 | **Campaña en AKS** (sesión 1 de 2: los 4 escenarios) | El pipeline de Experimento la ejecuta |
+| 11 | **Campaña** (sesión 2 de 2), estadística y gráficas | Documentación de pipelines |
+| 12 | Memoria final, README, ADRs, portfolio | Buffer |
+
+El catálogo de fallos (Tarea 12) se construye de forma incremental en las semanas 2-6. La memoria lleva un borrador casi completo antes de la semana 11.
+
+**Si el tiempo aprieta, cede en este orden** (nunca CI, CD ni Terraform, ni el circuit breaker, que pidió el tutor): N de 5 a 3 → catálogo de fallos solo cualitativo → `AuthorizationPolicy` (la seguridad de red queda en NetworkPolicy + mTLS `STRICT`) → factorial 2×2 reducido a A vs D (con D′, D sin circuit breaker, en lugar de C′ en E2b) → variante A0 → mini-operador y certificaciones (opcionales).
+
+**Semanas 4-6 son las más cargadas** (resiliencia, red, seguridad, mesh y Terraform a la vez). Si al cerrar la semana 6 Istio no funciona en `kind`, se aplica ya el orden de recorte de arriba y no se retrasa la sesión de Azure 1.
+
+**Plan B de Azure:** si se acaba el presupuesto, la campaña se repite en `kind` y se documenta como limitación.
+
+### Presupuesto (≈ 4 VMs `D2s_v5`, ~0,4 $/h; confirmar con la calculadora de Azure)
+
+Los proxies del mesh pueden exigir un nodo más en `app` (~5-8 € más en la campaña, a cargo del margen); se confirma en el piloto.
+
+| Concepto | Estimación |
+|---|---|
+| Sesiones de desarrollo en AKS (~50 h) | ~20 € |
+| Campaña (~40 h) | ~15 € |
+| ACR Basic, Blob de estado, IP, discos | ~20 € |
+| Margen | ~45 € |
+
+Un clúster 24/7 serían ~280 $/mes: **se destruye entre sesiones** (`terraform destroy`; un clúster parado sigue cobrando discos e IP). Se conservan solo el estado de Terraform y ACR. Alertas de presupuesto al 50 % y 80 % definidas en Terraform. Máximo una sesión de Azure por semana.
 
 ---
 
-## Tarea 1 — Fork incremental ✅
+## 3. Sistema bajo prueba (Tareas 1-3, hecho)
 
-Se modifica este fork en vez de copiar `src/` a un repo nuevo: los manifiestos, `kustomize/base` y `kustomize/components/network-policies` (el aislamiento del Escenario B) ya existen, y el historial de git es evidencia citable del proceso.
+Se modifica el fork en vez de copiar `src/` a un repo nuevo: los manifiestos y `kustomize/` ya existen y el historial de git es evidencia citable del proceso. Todo lo exclusivo de Google Cloud se eliminó. **`helm-chart/`, `terraform/` (GCP) y `src/loadgenerator/` (Locust) siguen solo como referencia y se borran antes de publicar el repo**, con lo que dependa de ellos: Locust cuando exista el script de k6 (sus manifiestos salen antes, en la Tarea 8); el Terraform de GCP se sustituye en `terraform/` por el de Azure; `helm-chart/` junto con `helm-chart-ci.yaml` y sus referencias en los otros workflows.
 
-## Tarea 2 — Limpieza del fork ✅
-
-**Borrado:** todo lo exclusivo de Google Cloud o del proyecto original sin valor aquí — `.deploystack/`, `cloudbuild.yaml`, `skaffold.yaml`, `istio-manifests/`, `release/` y `docs/releasing/`, los workflows atados a su proyecto GCP (`ci-main`, `deploy-pr`, `cleanup`, `make-release`) con `.github/terraform/` y `.github/release-cluster/`, la gobernanza de proyecto open source (CODEOWNERS, plantillas, etc.) y `shoppingassistantservice` (fuera del alcance de 10 servicios).
-
-**Se mantiene aunque no se use directamente:**
-- `terraform/` (GCP): referencia de estructura hasta escribir el de Azure (Tarea 7).
-- `helm-chart/`: no se usa (el despliegue es Kustomize + Argo CD), solo referencia.
-- Componentes opcionales de `kustomize/components/`: ejemplos de cómo componer overlays. `google-cloud-operations` está obsoleto (activa Profiler/Tracing que el código ya no tiene).
-- `src/loadgenerator/` (Locust): referencia de los recorridos de usuario; borrar cuando exista el script de carga de k6 (Tarea 12).
-- Workflows `kustomize-build-ci`, `terraform-validate-ci`, `kubevious-manifests-ci` y `helm-chart-ci` (validan por ruta, siguen sirviendo), y `ci-pr.yaml` (CI heredado, a sustituir en la Tarea 6).
-- `.github/renovate.json5`: actualiza las dependencias de los servicios. Ignora `kustomize/base/**` hasta la Tarea 8.
-
----
-
-## Tarea 3 — Validación local de microservicios ✅
-
-### Reglas (se aplican a cualquier cambio en un servicio)
+### Reglas para cualquier cambio en un servicio
 
 1. Compila, arranca y pasa sus tests.
-2. Sin código GCP-específico (Profiler, metadata server, AlloyDB/Spanner…) ni OpenTelemetry: no hay Collector; la observabilidad es la de la Tarea 14.
-3. Sin código muerto: funciones sin uso, ramas inalcanzables o equivalentes, variables de entorno que nadie lee, ficheros que no compilan.
-4. **Tests solo de lógica real y alcanzable sin red** (parseo, cálculo, validación, traducción de errores, plantillas). Sin servidor gRPC real; las dependencias se sustituyen por fakes en memoria. Lo que exige abrir un puerto (arranque del servidor) queda sin cubrir a propósito. Las pruebas con los servicios reales van en `e2e/`.
-5. Linter y formateador con la misma herramienta que el CI, configurados dentro de cada servicio (excepción: `.editorconfig` en la raíz, estándar por repositorio).
-6. **Dockerfile de producción:** base fijada por digest; imagen final mínima sin herramientas de build; usuario no-root explícito; ningún `COPY` al stage final con `--chown` (los ficheros quedan de root y el proceso no puede modificar su propio código aunque falte `readOnlyRootFilesystem`).
-7. **`Dockerfile.dev` multietapa:** cada comando del README es una etapa con el mismo nombre en los 10 servicios — `test`, `coverage`, `lint`, `format`, `format-check`, `dependencies`, `codegen` y, en Go, `vulncheck` (`cartservice` no tiene `format-check`, porque su `lint` ya comprueba el formato, ni `codegen`, y su `dependencies` solo informa: NuGet no tiene un comando que reescriba las versiones del `.csproj`). Se ejecutan con `docker build -f Dockerfile.dev --target <etapa> .`, y lo que generan sale con `--output type=local,dest=.` (a nombre del usuario, no de root). La última etapa, `dev`, es el hot-reload que construye Compose. Igual en local que en CI: nada de `setup-<lenguaje>`.
-8. Código generado (`genproto/`, `demo_pb2*.py`, `obj/`, `build/generated`) fuera del linter y de la cobertura. Nunca se tocan las cabeceras de licencia.
+2. Sin código específico de GCP ni OpenTelemetry (no hay Collector; la observabilidad es la de la Tarea 14).
+3. Sin código muerto: funciones sin uso, ramas inalcanzables, variables de entorno que nadie lee.
+4. **Tests solo de lógica real y alcanzable sin red**, con fakes en memoria. Lo que exige abrir un puerto queda sin cubrir a propósito. Las pruebas con los servicios reales van en `e2e/`.
+5. Código generado (`genproto/`, `demo_pb2*.py`, `obj/`, `build/generated`) fuera del linter y de la cobertura. Nunca se tocan las cabeceras de licencia.
+6. **Dockerfile de producción:** base fijada por digest; imagen final mínima; usuario numérico no-root (`65532` en distroless, `1000` en Alpine); `HEALTHCHECK NONE` (la salud la comprueban las probes); ningún `COPY` con `--chown` en el stage final.
+7. **`Dockerfile.dev` multietapa**, con las mismas etapas en los 10 servicios: `test`, `coverage`, `lint`, `format`, `format-check`, `dependencies`, `codegen` y, en Go, `vulncheck` (`cartservice` no tiene `format-check` ni `codegen`). Se ejecutan con `docker build -f Dockerfile.dev --target <etapa> .` y lo generado sale con `--output type=local,dest=.`. La última etapa, `dev`, es el hot-reload de Compose. **El CI usa estas mismas etapas**; nada de `setup-<lenguaje>`.
 
-### Estado y herramientas por servicio
+### Herramientas y umbrales de cobertura (los usa el CI)
 
-| Servicio | Lenguaje | Tests | Linter | Hot-reload | Umbral de cobertura |
-|---|---|---|---|---|---|
-| `productcatalogservice` | Go | `go test` | golangci-lint | `air` | 45% |
-| `shippingservice` | Go | `go test` | golangci-lint | `air` | 55% |
-| `checkoutservice` | Go | `go test` | golangci-lint | `air` | 70% |
-| `frontend` | Go | `go test` | golangci-lint | `air` | 70% |
-| `paymentservice` | Node | Jest | ESLint + Prettier | `node --watch` | 70% |
-| `currencyservice` | Node | Jest | ESLint + Prettier | `node --watch` | 70% |
-| `emailservice` | Python | pytest | ruff | `watchmedo` | 70% |
-| `recommendationservice` | Python | pytest | ruff | `watchmedo` | 70% |
-| `adservice` | Java | JUnit 6 + JaCoCo | Checkstyle + google-java-format | `watchexec --poll` | 50% |
-| `cartservice` | C# | xunit v3 + Coverlet | `dotnet format` | `watchexec` + `dotnet run` | 70% |
+| Servicio | Lenguaje | Tests | Linter | Umbral |
+|---|---|---|---|---|
+| `productcatalogservice` | Go | `go test` | golangci-lint | 45 % |
+| `shippingservice` | Go | `go test` | golangci-lint | 55 % |
+| `checkoutservice` | Go | `go test` | golangci-lint | 70 % |
+| `frontend` | Go | `go test` | golangci-lint | 70 % |
+| `paymentservice` | Node | Jest | ESLint + Prettier | 70 % |
+| `currencyservice` | Node | Jest | ESLint + Prettier | 70 % |
+| `emailservice` | Python | pytest | ruff | 70 % |
+| `recommendationservice` | Python | pytest | ruff | 70 % |
+| `adservice` | Java | JUnit + JaCoCo | Checkstyle + google-java-format | 50 % |
+| `cartservice` | C# | xunit v3 + Coverlet | `dotnet format` | 70 % |
 
-Los umbrales por debajo del 70% general son de servicios donde casi todo lo no cubierto es arranque del servidor (regla 4); se prefiere bajar el umbral a excluir código propio del cómputo.
+Los umbrales por debajo del 70 % son de servicios donde casi todo lo no cubierto es arranque del servidor; se prefiere bajar el umbral a excluir código propio del cómputo.
 
-**Hallazgo intencionado del linter:** cada servicio deja a propósito **un único** hallazgo, siempre una expresión booleana redundante, como demostración de que el linter funciona en CI. No es un descuido; no corregirlo.
+**Hallazgo intencionado del linter:** cada servicio deja a propósito **un único** hallazgo (una expresión booleana redundante), para demostrar que el linter funciona en CI. No corregirlo; documentarlo en el README para que no se lea como descuido.
 
 | Stack | Regla | Dónde |
 |---|---|---|
-| Go | `S1002` (staticcheck) | lectura de `PORT` en `main` (`== true`) |
+| Go | `S1002` | lectura de `PORT` en `main` |
 | Java | `SimplifyBooleanExpression` | `blockUntilShutdown()` |
 | Node | `no-extra-boolean-cast` | `charge.js` (payment), guard `require.main` (currency) |
 | Python | `SIM210` | `logger.py` (email), `start()` (recommendation) |
-| C# | `WHITESPACE` (`dotnet format`) | `RequireUserId(...)` de `EmptyCart`; el comando de formato del README también lo corrige |
+| C# | `WHITESPACE` | `RequireUserId(...)` de `EmptyCart` |
 
-### Decisiones vigentes
+### Decisiones de comportamiento que afectan al experimento
 
-**Puertos:** cada servicio usa el mismo puerto en desarrollo y en producción, sin remapear en Compose: `paymentservice` 50052, `recommendationservice` 8081 y `frontend` 8082 (cambiados respecto al original para no chocar), `shippingservice` 50051, `emailservice` 8080. En los manifiestos, el `Service` de `emailservice` sigue publicando el puerto 5000 heredado (ver Tarea 8).
+- **Puertos** (iguales en desarrollo y producción): `frontend` 8082, `paymentservice` 50052, `recommendationservice` 8081, `shippingservice` 50051, `emailservice` 8080 (su `Service` publica 5000: igualar a 8080, Tarea 8).
+- **Errores gRPC**, iguales en todos los servicios: petición inválida → `InvalidArgument`; estado del sistema (carrito vacío) → `FailedPrecondition`; dependencia caída o saturada → `Unavailable`; otro fallo → `Internal`. Excepciones: `NotFound` en `productcatalogservice` y `DeadlineExceeded`/`Canceled` en `checkoutservice` solo cuando vence o se cancela el contexto del llamante. El código de una dependencia nunca se reenvía y nunca viaja una traza al cliente. `frontend` traduce a HTTP con la tabla de `google/rpc/code.proto`; en un 5xx muestra un mensaje genérico y el *request ID*.
+- **Plazos:** `frontend` corta cada petición a `REQUEST_TIMEOUT` (por defecto `5s`) y el plazo se propaga por toda la cadena. Sin reintentos automáticos en ningún cliente ni en el mesh.
+- **Apagado ordenado con SIGTERM** en los 10 servicios: dejan de aceptar peticiones, el health check pasa a `NOT_SERVING`, terminan las peticiones en curso en 10 s (por debajo de los 30 s de Kubernetes) y cortan el resto.
+- **Logs:** JSON con `timestamp`, `severity` y `message`; `LOG_LEVEL` = `debug`, `info`, `warn` o `error`. **Nunca** en los logs: número de tarjeta, CVV, email ni ID de sesión (hay tests de regresión).
+- **`cartservice` / Redis:** cada carrito es un hash `cart:<usuario>`; `HINCRBY` + `EXPIRE` de 48 h en una transacción (atómico con varias réplicas). Con Redis caído falla al instante (`FailFast`). Su health check no depende de Redis, para que un Redis caído no reinicie todos los pods. Sin `REDIS_ADDR` usa un almacén en memoria. Redis sin contraseña a propósito: limitar quién llega a él es el eje de la NetworkPolicy.
+- **`frontend` (expuesto a internet):** CSP estricta, cabeceras de seguridad, CSRF con `http.NewCrossOriginProtection()` (k6 y curl pasan), cookies `HttpOnly`/`SameSite=Lax`/`Path=/` (`Secure` y HSTS cuando haya TLS, Tarea 10), timeouts del servidor y límite de 64 KiB al cuerpo.
 
-**Códigos de error gRPC** (guía de gRPC y AIP-193), igual en todos los servicios:
-- fallo de la petición → `InvalidArgument`;
-- estado del sistema (p. ej. carrito vacío, producto inexistente en el carrito) → `FailedPrecondition`;
-- dependencia caída o saturada → `Unavailable`;
-- cualquier otro fallo → `Internal`.
-- excepciones estándar: `NotFound` en `productcatalogservice` (producto inexistente, AIP-193), y `DeadlineExceeded`/`Canceled` en `checkoutservice` solo cuando vence o se cancela el contexto del propio llamante.
+### Escaneo de vulnerabilidades
 
-El código de una dependencia nunca se reenvía tal cual y nunca viaja una traza al cliente. `frontend` traduce a HTTP con la tabla de `google/rpc/code.proto`. En un 4xx muestra el motivo; en un 5xx, un mensaje genérico y el *request ID*, que enlaza con la línea de log completa.
+`trivy image --scanners vuln,secret --image-config-scanners misconfig` sobre las 10 imágenes (hoy: 0 vulnerabilidades, 0 secretos, 0 *misconfigurations*), más `govulncheck` en los 4 servicios Go. Versiones fijadas: Trivy `0.76.0`, k6 `2.3.0`, `redis:8.10.2-alpine` (digest en `compose.yaml`); el resto, en los Dockerfile.
 
-**Plazos:**
-- `frontend` corta cada petición a los `REQUEST_TIMEOUT` (por defecto `5s`), y el plazo se propaga por toda la cadena.
-- Sin reintentos automáticos en ningún cliente (ver Tarea 12).
-- `cartservice` falla al instante si Redis no responde (`BacklogPolicy.FailFast`) en vez de esperar al plazo.
+### Entorno de desarrollo
 
-**Logs:** JSON con `timestamp` (ISO 8601 UTC), `severity` y `message`, más el nombre del logger.
-- `LOG_LEVEL` = `debug`, `info` (por defecto), `warn` o `error`; un valor desconocido hace fallar el arranque con una línea JSON.
-- `info` para arranque, configuración, apagado y cobros; lo que se repite en cada petición, a `debug` (`compose.yaml` usa `debug`).
-- **Nunca** en los logs: número de tarjeta ni CVV (PCI DSS), email del cliente ni ID de sesión (es la clave del carrito). Hay tests de regresión de esto.
-
-**Apagado ordenado con SIGTERM** en los 10 servicios: dejan de aceptar peticiones, el health check pasa a `NOT_SERVING`, terminan las que tienen en curso en un plazo de 10 s (por debajo de los 30 s de Kubernetes) y después cortan el resto. En Node y Python hace falta el manejador explícito: como PID 1 del contenedor, sin él ignorarían SIGTERM.
-
-**`cartservice` / Redis:**
-- Cada carrito es un hash `cart:<usuario>` con un campo por producto.
-- `HINCRBY` + `EXPIRE` de 48 h (la vida de la cookie de sesión) en una transacción: es atómico también con varias réplicas, y ningún carrito queda sin caducidad.
-- El health check responde `SERVING` sin depender de Redis, para que un Redis caído no reinicie todos los pods; solo pasa a `NOT_SERVING` durante el apagado, como el resto.
-- Sin `REDIS_ADDR` usa un almacén en memoria.
-- Redis sin contraseña, a propósito: limitar quién llega a él es justo el eje A vs B (`NetworkPolicy` de `redis-cart`).
-
-**`frontend` (expuesto a internet):**
-- CSP estricta, sin nada en línea; cabeceras `X-Content-Type-Options`, `X-Frame-Options` y `Referrer-Policy`.
-- CSRF con `http.NewCrossOriginProtection()`; las peticiones sin cabeceras de navegador (k6, curl) pasan.
-- Cookies `HttpOnly`, `SameSite=Lax` y `Path=/` (sin él, el navegador las limitaría a la carpeta de la primera página, p. ej. `/product`, y `/cart` no recibiría la sesión); `Secure` y HSTS cuando haya TLS (Tarea 10).
-- Timeouts del servidor HTTP y límite de 64 KiB al cuerpo de las peticiones.
-- La home no llama a `adservice` (no tiene hueco de anuncio).
-
-**Imágenes base y herramientas** (todas fijadas; las de producción, por digest):
-- **Lenguajes** (la misma imagen, por digest, en `Dockerfile` y `Dockerfile.dev`): `golang:1.27.3-alpine` (`go 1.27.0` en los cuatro `go.mod`), `node:24.22.0-alpine`, `python:3.15.0-alpine`, `eclipse-temurin:25` (JDK, solo en el builder) y .NET 10 (SDK `10.0.402-alpine3.24`).
-- **Bases de la imagen final:** distroless `static:nonroot` en Go, `alpine:3.24.2` en Node y Java, y `runtime-deps:10.0.13-alpine3.24` en C#.
-- **Herramientas:** `redis:8.10.2-alpine` (por digest también en `compose.yaml`), `golangci-lint v2.15.0`, `grpcurl v1.9.3`, `govulncheck v1.9.0`, `uv 0.13.3`, Gradle `9.8.2`, Trivy `0.76.0` y k6 `2.3.0`.
-- `adservice` lleva un JRE propio generado con `jlink` sobre `alpine`.
-- Python copia solo `site-packages` a la imagen final y desinstala `pip`.
-- Node se queda en la 24 (LTS) hasta que la 26 pase a LTS (finales de octubre de 2026). Python pasa a la 3.15 (estable desde el 9 de octubre de 2026; grpcio ya publica ruedas cp315 para musl).
-- **`Dockerfile.dev` lo más parecido posible a producción**, sin perder funcionalidad: misma imagen base, `apk upgrade` (salvo en Go, cuya imagen final es distroless), la misma configuración de npm, `HEALTHCHECK NONE` y, en `cartservice`, el mismo puerto por defecto (7070). Se quedan como excepciones lo que el desarrollo necesita: usuario `dev`/`node` con UID 1000 (los ficheros montados son del desarrollador), JDK y SDK completos, `pip`, y sin `DOTNET_EnableDiagnostics=0` (impediría conectar el depurador).
-- **Imagen final:** usuario numérico (`65532:65532` en distroless, `1000:1000` en Alpine), para que Kubernetes pueda comprobar `runAsNonRoot` aunque falte `runAsUser`; y `HEALTHCHECK NONE`, porque la salud la comprueban las probes de Kubernetes.
-
-**Dependencias:**
-- Sin `overrides` en `package.json` para silenciar avisos de dependencias transitivas de desarrollo. Avisos conocidos que se dejan:
-  - `glob@10.5.0` y `sprintf-js` dentro de Jest;
-  - `Configuration.setVisible` del plugin de protobuf de Gradle 0.10.0, que ya es su última versión.
-- npm deniega los scripts de instalación (`allowScripts`), y producción se instala con `npm ci --omit=dev`. `Dockerfile.dev` también usa `npm ci`; solo la etapa `dependencies` usa `npm install`, para poder regenerar `package-lock.json` tras cambiar `package.json`. Los dos Dockerfile llevan la misma `ENV NPM_CONFIG_*`: sin el aviso de versión nueva de npm, `fund` ni la auditoría en cada instalación (la auditoría es cosa de `dependencies`).
-- Las dependencias de test van en un fichero aparte de las de producción.
-
-**Escaneo de vulnerabilidades:**
-- Trivy (`--scanners vuln,secret --image-config-scanners misconfig`) sobre las 10 imágenes: 0 vulnerabilidades, 0 secretos y 0 *misconfigurations*. Y `govulncheck` en los 4 servicios Go, porque detecta vulnerabilidades alcanzables que Trivy no marca.
-- La configuración se escanea en la imagen (`--image-config-scanners`) y no con `trivy config` sobre el Dockerfile, porque así no hay que montar ficheros y el comando funciona igual dentro del devcontainer. `trivy config` da 0 en los 20 Dockerfile: la etapa `dev` también declara `HEALTHCHECK NONE`, porque el healthcheck lo pone `compose.yaml`.
-- Las imágenes finales Alpine hacen `apk upgrade --no-cache`: las correcciones publicadas después de la imagen base entran sin esperar a que se republique (así se corrigió `zlib` CVE-2026-85091, MEDIUM, en las 6).
-
-**Entorno de desarrollo:**
-- `compose.yaml` levanta los 10 servicios más `redis-cart` con hot-reload (etapa `dev`, con `target` explícito).
-  - Cada servicio tiene su `healthcheck`, contra `127.0.0.1` y no `localhost`, porque BusyBox resuelve `localhost` solo a IPv6. Como las probes: `Health/Check` por gRPC con `grpcurl` exigiendo `SERVING` (un puerto abierto no basta), HTTP `/_healthz` en `frontend` y `redis-cli ping` en `redis-cart`.
-  - `start_interval: 1s` durante el arranque (`start_period`: 120 s; 300 s en `adservice` y `cartservice`, cuyo primer arranque descarga Gradle o los paquetes NuGet) y cada 10 s después: lo que depende de un servicio arranca en cuanto este responde.
-  - `depends_on` usa `service_healthy`.
-  - Los 10 paran en menos de 1 s con SIGTERM. `cartservice` usa `watchexec` + `dotnet run`, como `adservice`, y no `dotnet watch`, que ignora SIGTERM y SIGINT y hacía esperar siempre los 10 s hasta el SIGKILL.
-  - `redis-cart` lleva el mismo endurecimiento que en Kubernetes.
-- **`WORKDIR /app` en todos.**
-- La etapa `dev` corre con un usuario de UID 1000, para que lo que se escriba en las carpetas montadas sea del desarrollador. Las cachés van en volúmenes con nombre por servicio.
-  - Tras crear un volumen como root, hay que borrarlo una vez con `docker compose down -v`.
-  - Tras cambiar `package.json`: `docker compose down -v <servicio>` y luego `up --build`.
-- **Devcontainers:** uno por servicio en `.devcontainer/<servicio>/`, que reutiliza el servicio de Compose; git por HTTPS con la sesión de GitHub de VS Code.
-  - El `initializeCommand` escribe en `.env` el grupo del socket de Docker (`DOCKER_GID`), que `compose.yaml` añade con `group_add`.
-  - Monta el CLI de Docker del host, que en Debian/Ubuntu (`docker-ce-cli`) está enlazado con glibc: por eso la etapa `dev` instala `gcompat` en las imágenes musl (Alpine). Los plugins (`buildx`, `compose`) son estáticos.
-  - Si el servicio ya estaba en marcha, hay que abrirlo con *Rebuild Container*.
-  - El CLI de Dev Containers construye con un Dockerfile propio, generado fuera de la carpeta del servicio, así que BuildKit aplica el `.dockerignore` de producción y no `Dockerfile.dev.dockerignore`: por eso el de Python no ignora `requirements-test.in`, que copia su `Dockerfile.dev` (si no, el devcontainer no se construye).
-  - Construirlo exige `BUILDX_BAKE_ENTITLEMENTS_FS=0` en el host: Compose construye con Bake, que pide permiso para leer el Dockerfile que el CLI de Dev Containers genera fuera del contexto. El arreglo, [docker/compose#14286](https://github.com/docker/compose/pull/14286), se cerró sin fusionar.
-  - En Windows, el repo se clona dentro de WSL2 (desde `C:\` no hay hot-reload).
-- `adservice`: parar su contenedor de desarrollo antes de lanzar las etapas de Gradle, porque comparten el bloqueo de `.gradle/`.
+`compose.yaml` levanta los 10 servicios más `redis-cart` con hot-reload (etapa `dev`); devcontainers por servicio en `.devcontainer/<servicio>/`. Gotchas:
+- Construir un devcontainer exige `BUILDX_BAKE_ENTITLEMENTS_FS=0` en el host.
+- Tras cambiar `package.json`: `docker compose down -v <servicio>` y luego `up --build`.
+- `adservice`: parar su contenedor de desarrollo antes de lanzar las etapas de Gradle (comparten el bloqueo de `.gradle/`).
+- En Windows, el repo se clona dentro de WSL2.
 
 ---
 
-## Tarea 4 — Validación local de Kubernetes (`kind`) ⏳
+## Tarea 4 — Kubernetes en `kind` ⏳
 
-- Clúster `kind` con **Cilium** como CNI (kindnet no aplica NetworkPolicies), igual que el dataplane de AKS (Tarea 7).
-- Las imágenes de `kustomize/base` siguen siendo las publicadas por Google, sin los cambios de la Tarea 3. Hay que construir las propias y cargarlas con `kind load docker-image`, usando el componente `container-images-registry`/`tag` o el overlay propio.
-- **Escenario A:** los 10 servicios y `redis-cart` sanos, con las probes en verde.
-- **Escenario B:** las NetworkPolicies bloquean el tráfico no autorizado (p. ej. acceso a Redis desde un pod sin permiso) y dejan pasar el legítimo. Comprobar también que un pod que excede `LimitRange`/`ResourceQuota` es rechazado.
-- **Comprobar que Hubble expone `cilium_drop_count_total`** y las métricas L7. La Tarea 14 depende de ellas.
-- Ejecutar `e2e/smoke.js` y `e2e/cart-concurrent.js` contra los dos namespaces con el Job ya preparado (`kubectl apply -k e2e -n <namespace>`, ver `e2e/README.md`), y una prueba de humo de la inyección de fallos y de la carga.
+Aquí se hace el grueso del aprendizaje de Kubernetes (semanas 1-6), con YAML a mano antes de Kustomize.
+
+- Clúster `kind` **multinodo** (1 control plane + 3 workers) con **Cilium** como CNI, el mismo dataplane que AKS (Tarea 7), para que las NetworkPolicies y sus métricas se comporten igual en local y en la nube. Comprobar que la máquina aguanta 4 nodos más Prometheus.
+- Las imágenes de `kustomize/base` siguen siendo las de Google: construir las propias y cargarlas con `kind load docker-image`.
+- Cada bloque de temas termina con su nota en `docs/notas/` y su fallo provocado: workloads y ciclo de vida; recursos y QoS (throttling, OOM); scheduling (taints, affinity, PDB, `drain`); red (Services, CoreDNS, NetworkPolicy, Cilium); seguridad (RBAC, PSA, Kyverno).
+- Validar los 4 overlays: los 10 servicios y `redis-cart` sanos; las NetworkPolicies bloquean lo no autorizado (acceso a Redis desde un pod sin permiso) y dejan pasar lo legítimo; un pod que excede `LimitRange`/`ResourceQuota` es rechazado.
+- Ejecutar `e2e/smoke.js` y `e2e/cart-concurrent.js` en cada namespace con el Job preparado (`kubectl apply -k e2e -n <namespace>`, ver `e2e/README.md`) y una prueba de humo de la inyección de fallos y de la carga.
+- **Istio** instalado por Helm, igual que irá en AKS (no el add-on de AKS, para que los dos entornos sean idénticos). Primero ver el problema sin mesh (semana 4: réplica desequilibrada con gRPC y fallo gris, ambos al catálogo de fallos) y luego añadirlo. **Modo sidecar** (decidido; ambient descartado, ver «Descartados»). Puntos a resolver:
+  - **`istio-cni` obligatorio:** el *init container* por defecto pide `NET_ADMIN` y PSA `restricted` lo rechaza.
+  - **Convivencia con Cilium:** si Cilium resuelve el `Service` en el *socket* del pod, el sidecar solo ve la IP del pod destino y no aplica reparto ni circuit breaker (sin dar error). En `kind`, Cilium con los ajustes que pide Istio (`socketLB.hostNamespaceOnly=true`, `cni.exclusive=false`), y comprobar que el Cilium gestionado de AKS se comporta igual. **Si no, en AKS se usa el add-on de Istio de AKS**, que Microsoft soporta sobre su dataplane (también es sidecar; las mismas CRDs).
+  - **Arranque y parada:** sidecars nativos (*init containers* con `restartPolicy: Always`) para que el proxy arranque antes y pare después que la app, sin errores en el arranque ni en el apagado ordenado.
+  - **Prueba de que el mesh actúa de verdad:** en el fallo gris, el circuit breaker expulsa la réplica (telemetría de Istio), no solo que los pods tengan el sidecar.
+- Comprobar que las NetworkPolicy dejan pasar el tráfico del mesh (puertos del plano de control `istiod`, p. ej. 15012, y DNS) y el *scraping* de Prometheus a los sidecars (15090), y que los reintentos de Istio están a 0.
+- Con mTLS `STRICT` (B y D), comprobar que siguen llegando a `frontend` k6, el Job de `e2e/` (con sidecar nativo, para que el Job termine: con un sidecar clásico no acabaría nunca) y el Gateway.
 - Medir con carga, antes de decidir, los pendientes de la Tarea 8: memoria de la JVM de `adservice` y límite de streams gRPC.
-- (Opcional) Argo CD en el mismo `kind`, para validar el `ApplicationSet`.
+- Argo CD en el mismo `kind` para validar el `ApplicationSet` (semana 8).
 
 ## Tarea 5 — Validación local de Terraform ⏳
 
-`terraform fmt -check`, `validate` y `plan` (solo necesita credenciales, no crea nada). Solo con las Tareas 3, 4 y 5 en verde se ejecuta el primer `terraform apply`.
+`terraform fmt -check`, `validate` y `plan`. **Bootstrap:** un script con `az` crea la cuenta de almacenamiento del estado (con bloqueo) y la identidad OIDC de GitHub Actions: sin lo primero `plan` no funciona con backend remoto, y sin lo segundo el CI no puede ejecutarlo. Es lo único que se crea en Azure antes del primer `apply` (céntimos al mes). Solo con las Tareas 3, 4 y 5 en verde se ejecuta el primer `apply`.
 
 ---
 
 ## Tarea 6 — Pipeline de CI ⏳
 
-No depende de Azure, salvo las credenciales de solo lectura que necesita `terraform plan` (OIDC). Va creciendo de alcance a medida que las Tareas 7-9 añaden contenido. Se dispara en cada PR, con dos tracks en paralelo. **Todo se ejecuta en Docker, con las etapas de `Dockerfile.dev`**: cada etapa genera el formato que espera la action de informe correspondiente, y esa action anota la PR.
+Se dispara en cada PR, con dos tracks en paralelo. **Todo se ejecuta en Docker, con las etapas de `Dockerfile.dev`**: cada etapa genera el formato que espera la action de informe, y esa action anota la PR. Las actions se fijan por SHA (Renovate las actualiza). Va creciendo de alcance con cada fase.
 
 ### A) Matriz por microservicio
 
-1. **Tests + cobertura**, en una sola ejecución (etapas `test`/`coverage`).
-   - Informe de tests con `dorny/test-reporter`: `golang-json`, `java-junit` (sirve también para el JUnit de pytest y de `jest-junit`) y `dotnet-trx`.
-2. **Gate de cobertura, bloqueante**, con los umbrales de la tabla de la Tarea 3:
-   - Go → `gwatts/go-coverage-action`;
-   - Java → `madrapps/jacoco-report`;
-   - Node → `ArtiomTr/jest-coverage-report-action`;
-   - Python y .NET → Cobertura XML con `irongut/CodeCoverageSummary`.
-
-   Gradle + JaCoCo es la combinación más frágil: si falla, se documenta como limitación.
-3. **Linter, informativo (no bloquea)**, con anotaciones en la PR:
-   - `golangci-lint-action`, `reviewdog/action-eslint` y `astral-sh/ruff-action`;
-   - reviewdog con `-f=dotnet` y `-f=checkstyle`. Antes de pasarle la salida hay que quitar el prefijo `/app/` de las rutas (`sed 's|/app/||g'`), porque `dotnet format` y Checkstyle guardan rutas del contenedor.
-4. **Formato, informativo — decisión del usuario, no reconsiderar.** Usa la etapa `format-check`, y el CI nunca formatea. En `cartservice`, el `lint` ya cubre el formato.
-5. **`go test -race`** en los 4 Go, en un paso propio (necesita CGO y `gcc`, que no tienen las etapas): la carrera de datos que se corrigió en `productcatalogservice` solo se detecta así.
-6. **Caché de BuildKit:** los Dockerfile usan `--mount=type=cache`, pero GitHub Actions no la conserva entre ejecuciones. Hay que persistirla (p. ej. `buildkit-cache-dance` con `actions/cache`) o no se gana nada en CI.
+1. **Tests + cobertura** en una sola ejecución. Informe con `dorny/test-reporter`: `golang-json`, `java-junit` (sirve también para pytest y `jest-junit`) y `dotnet-trx`.
+2. **Gate de cobertura, bloqueante**, con los umbrales de la tabla: Go → `gwatts/go-coverage-action`; Java → `madrapps/jacoco-report`; Node → `ArtiomTr/jest-coverage-report-action`; Python y .NET → Cobertura XML con `irongut/CodeCoverageSummary`. Gradle + JaCoCo es lo más frágil: si falla, se documenta como limitación.
+3. **Linter, informativo**, con anotaciones: `golangci-lint-action`, `reviewdog/action-eslint`, `astral-sh/ruff-action`; reviewdog con `-f=dotnet` y `-f=checkstyle`, quitando antes el prefijo `/app/` de las rutas (`sed 's|/app/||g'`).
+4. **Formato, informativo — decisión del usuario, no reconsiderar.** Usa `format-check`; el CI nunca formatea.
+5. **`go test -race`** en los 4 Go, en un paso propio (necesita CGO y `gcc`): la carrera de datos corregida en `productcatalogservice` solo se detecta así.
+6. **Caché de BuildKit** persistida entre ejecuciones (p. ej. `buildkit-cache-dance` con `actions/cache`); GitHub Actions no la conserva sola.
 
 ### B) Infraestructura, imágenes y manifiestos
 
 - `docker build` de las 10 imágenes de producción + Trivy (informativo; el bloqueo está en el CD) + `govulncheck`.
-- **Tests de punta a punta (`e2e/run.sh`), job bloqueante** (ver abajo).
-- `terraform fmt`/`validate`/`plan` comentado en la PR, + tfsec, checkov y tflint (informativos).
-- `kustomize build` de los overlays A y B + `kube-linter`, que además da un dato comparativo entre A y B. `kustomize-build-ci` hoy solo compila `kustomize/` y `kustomize/tests/*/`: añadir los overlays al crearlos.
-- `actionlint` sobre los workflows.
+- **Tests de punta a punta (`e2e/run.sh`), job bloqueante.**
+- `terraform fmt`/`validate`/`plan` comentado en la PR + tflint, checkov y `trivy config` (tfsec está archivado y fusionado en Trivy).
+- `kustomize build` de los 4 overlays + `kube-linter`, que además da un dato comparativo entre escenarios. `kustomize-build-ci` hoy solo compila `kustomize/` y `kustomize/tests/*/`: añadir los overlays al crearlos.
+- `actionlint` sobre los workflows. Se sustituye el heredado `ci-pr.yaml`; `helm-chart-ci` se borra con `helm-chart/`; los de validación por ruta (`kustomize-build-ci`, `terraform-validate-ci`, `kubevious-manifests-ci`) se mantienen o se absorben.
 
 ### Tests de punta a punta (`e2e/`) ✅ — falta engancharlos al CI
 
-Los tests unitarios usan fakes (regla 4), así que los contratos entre servicios (copias del `.proto`, traducción de errores, propagación del plazo) y el recorrido completo se prueban aquí. Es **una sola batería que entra por HTTP en `frontend`**, no tests por pareja de servicios. Se escribe con **k6** porque el mismo código sirve después como smoke test del staging (Tarea 10) y como base de los recorridos y del usuario testigo (Tarea 12): por eso `lib/shop.js` tiene una función por página o formulario.
-
-**`compose.yaml`** usa las **imágenes de producción** con el endurecimiento de Kubernetes (`read_only`, `cap_drop: ALL`, `no-new-privileges`), en un proyecto propio sin puertos en el host.
-- **`ready`** (contenedor de un solo uso con `grpcurl`) espera hasta 120 s a que los 9 servicios gRPC respondan a `Health/Check`, `frontend` a `/_healthz` y `redis-cart` en su puerto, igual que las *readiness probes*. Si alguno no responde, el log dice cuál.
-  - Va en un contenedor aparte porque las imágenes distroless no tienen shell para un `healthcheck`.
-  - `init: true` es imprescindible: sin él, `sh` queda como PID 1 e ignora el SIGTERM de `timeout`.
-- k6 depende de `ready` y está en el perfil `test`.
+Una sola batería que entra por HTTP en `frontend` y prueba los contratos entre servicios (copias del `.proto`, traducción de errores, propagación del plazo). Escrita en k6 porque el mismo código sirve como smoke test del staging (Tarea 10) y como base de los recorridos y del usuario testigo (Tarea 12): `lib/shop.js` tiene una función por página o formulario.
 
 | Script | Qué comprueba |
 |---|---|
-| `smoke.js` | Todas las páginas y formularios, errores incluidos (404, 422, 400, 403 CSRF), cabeceras de seguridad, cookie de sesión y que su ID no salga en el HTML. El anuncio se da por bueno si aparece en alguno de 5 intentos, porque es opcional por diseño. |
+| `smoke.js` | Todas las páginas y formularios, errores incluidos (404, 422, 400, 403 CSRF), cabeceras de seguridad, cookie de sesión. |
 | `cart-concurrent.js` | 50 usuarios con la misma sesión añaden 1 unidad a la vez y el carrito acaba con 50 (atomicidad en Redis). |
-| `payment-hung.js` | `paymentservice` en pausa (acepta la llamada y no contesta): 504 al agotarse el plazo de 5 s, sin detalles internos, y el carrito se conserva. |
+| `payment-hung.js` | `paymentservice` en pausa: 504 al agotarse el plazo de 5 s, sin detalles internos, carrito conservado. |
 | `redis-down.js` | `redis-cart` parado: 503 al instante, sin detalles internos. |
 
-Umbrales: `checks: rate==1`, y en los dos primeros también `http_req_failed: rate==0` (un 5xx en cualquier petición falla el test).
-
-`run.sh` construye, levanta y ejecuta los cuatro scripts en ese orden; los dos últimos con `--no-deps`, porque `ready` esperaría al servicio caído. Al terminar restaura los servicios y lo borra todo con `down --profile test`; `KEEP=1` deja la tienda en marcha. Sale con error si falla cualquier comprobación.
-
-**En Kubernetes** (`e2e/kustomization.yaml`): un Job con k6 que ejecuta `smoke.js` y `cart-concurrent.js` (los que no necesitan inyectar un fallo) contra el `Service` `frontend` de su namespace, con los mismos scripts desde un ConfigMap (`lib/shop.js` vuelve a su carpeta con `items`). Lleva su propia `NetworkPolicy` (salida solo a `frontend:8082` y DNS), para funcionar también con el `deny-all` del Escenario B; `securityContext` restringido, requests/limits y `backoffLimit: 0`. `trivy config` del Job: solo `KSV-0110` (no fija namespace, a propósito: se elige con `-n` para usarlo en A y en B) y `KSV-0125` (k6 viene de Docker Hub, que Trivy no cuenta como registro de confianza; se resuelve sirviéndolo desde ACR en la Tarea 10).
-
-**Descartado:** integración de `cartservice` con Redis mediante Testcontainers. Los tests corren dentro de `docker build`, sin acceso a Docker, y lo importante (atomicidad y Redis caído) ya lo cubren `cart-concurrent.js` y `redis-down.js`.
+`e2e/compose.yaml` usa las imágenes de producción con el endurecimiento de Kubernetes, y `run.sh` construye, levanta y ejecuta los cuatro scripts (`KEEP=1` deja la tienda en marcha). **En Kubernetes** (`e2e/kustomization.yaml`): un Job con k6 que ejecuta `smoke.js` y `cart-concurrent.js` contra el `Service` `frontend` de su namespace, con su propia `NetworkPolicy` (salida solo a `frontend:8082` y DNS) para funcionar con el deny-all, y `securityContext` restringido. `trivy config` del Job solo marca `KSV-0110` (no fija namespace, a propósito) y `KSV-0125` (k6 viene de Docker Hub; se resuelve sirviéndolo desde ACR en la Tarea 10).
 
 ---
 
 ## Tarea 7 — Infraestructura Azure (Terraform) ⏳
 
-- VNet segmentada: subred pública para el Ingress y subred privada para los nodos.
-- **Un único clúster AKS para A y B**, separados por namespace. NetworkPolicy, ResourceQuota y LimitRange son recursos de namespace, así que se consigue el mismo aislamiento con la mitad de nodos.
-  - Dataplane **Azure CNI Powered by Cilium**, por Hubble y su `cilium_drop_count_total` por namespace (el Azure NPM clásico no da ese dato).
-  - Cluster Autoscaler con mínimo y máximo de nodos.
+- VNet propia con una subred para los nodos (Azure CNI Powered by Cilium en modo *overlay*). En Azure no hay subredes «públicas» como en AWS: lo público es la IP del balanceador por el que entra el tráfico.
+- **Un único clúster AKS para los 4 escenarios**, separados por namespace (NetworkPolicy, ResourceQuota y LimitRange son recursos de namespace). Dataplane **Azure CNI Powered by Cilium**. API server **público** con Entra ID/RBAC (los runners de GitHub deben poder llegar; no clúster privado).
+- **3 node pools** `sistema`, `carga` y `app`, con taints, en VMs **de la serie D, no B** (los créditos de CPU de las burstable distorsionan los benchmarks). Cluster Autoscaler configurable por variable: activo en desarrollo, apagado en la campaña.
 - ACR, con autenticación desde GitHub Actions por OIDC, sin credenciales estáticas.
-- Estado de Terraform en Azure Blob Storage, con bloqueo.
-- **`vm.overcommit_memory = 1` en el node pool** (`linux_os_config.sysctl_config`): lo pide `redis-cart` y no se puede fijar desde el pod.
-- **Variables:** versionar `terraform.tfvars` con los valores no secretos (región, tamaño de nodos…) y quitar la regla `*.tfvars` del `.gitignore`; lo sensible, por `TF_VAR_*` u OIDC en el pipeline. El `terraform.tfvars` actual es el de ejemplo de GCP.
-- **Entre sesiones de trabajo, `az aks stop`/`az aks start`**, para no pagar cómputo mientras no se usa.
+- Estado de Terraform en Azure Blob Storage con bloqueo (bootstrap en la Tarea 5).
+- **Argo CD instalado por Terraform** (`helm_release`); su *app-of-apps* instala desde git todo lo demás: kube-prometheus-stack (Prometheus, Grafana y kube-state-metrics), Kyverno, Istio, Chaos Mesh, cert-manager, el Gateway y los 4 escenarios, así el entorno reaparece solo tras cada `destroy`.
+- Alertas de presupuesto (50 % y 80 %).
+- **Variables:** versionar `terraform.tfvars` con los valores no secretos y quitar la regla `*.tfvars` del `.gitignore`; lo sensible, por `TF_VAR_*` u OIDC. El `terraform.tfvars` actual es el de ejemplo de GCP.
+- **Entre sesiones: `terraform destroy`** (ver presupuesto).
+- **Primera sesión de Azure:** comprobar que las métricas del agente de Cilium (`cilium_drop_count_total`, etc.) se pueden scrapear en el Cilium gestionado, y que el circuit breaker de Istio actúa sobre él (si no, add-on de Istio de AKS, ver Tarea 4). No se usa Hubble L7 ni ACNS (de pago).
 
-## Tarea 8 — Dos escenarios de despliegue (Kustomize) ⏳
+## Tarea 8 — Escenarios de despliegue (Kustomize) ⏳
 
-- **A** = `kustomize/base` en el namespace `boutique-baseline`.
-- **B** = overlay propio en `boutique-hardened`, con `components/network-policies`, `ResourceQuota` y `LimitRange` (estos dos, por crear).
-- Cada overlay fija su `namespace:`.
+Componentes `security` y `resilience` y los 4 overlays A-D (ver sección 1); cada overlay fija su `namespace:`. La configuración común del mesh (inyección del sidecar en el namespace, reintentos a 0, recursos del proxy) va en `base` o en un componente que incluyen los 4; el circuit breaker, en `resilience`; mTLS `STRICT` y `AuthorizationPolicy`, en `security`. Las NetworkPolicy de `security` permiten el tráfico del mesh.
 
-**Pendientes en los manifiestos:**
-- **Variables y endpoints sin uso:**
-  - `DISABLE_PROFILER`/`ENABLE_PROFILER` aparecen en `kubernetes-manifests/` y `kustomize/base/` de 7 servicios.
-  - `SHOPPING_ASSISTANT_SERVICE_ADDR` en `frontend`.
-
-  Nada de esto lo lee el código. Quitarlas.
-- **Imágenes:**
-  - Usar las propias, de ACR, en lugar de las de Google.
-  - `redis-cart` usa `redis:alpine` sin versión: fijar `redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0`, la misma que `compose.yaml`.
-  - Quitar `kustomize/base/**` de los `ignorePaths` de Renovate.
-- **`redis-cart`:**
-  - Desactivar las instantáneas RDB (`--save ""`): bajo carga, cada copia hace `fork()`, con picos de latencia y riesgo de OOMKilled, y solo salvan un reinicio del contenedor.
-  - Fijar `--maxmemory` (p. ej. 200mb) por debajo del límite del pod, con `volatile-lru`: así Redis expulsa carritos en vez de que lo mate Kubernetes.
-  - Igual en A y en B.
-- **`REQUEST_TIMEOUT` explícito en `frontend`**, igual en A y en B (ver Tarea 12).
-- **Endurecimiento solo en B** (A es la línea base con la que se compara):
-  - `seccompProfile: RuntimeDefault` (lo exige el estándar *restricted* de los Pod Security Standards).
-  - `automountServiceAccountToken: false` (ningún servicio usa la API de Kubernetes).
-
-  Los 10 servicios ya tienen en `base` `runAsNonRoot`, `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false` y `drop: [ALL]`.
-- **Límite de streams gRPC simultáneos por conexión:** grpc-go y grpc-js no ponen límite por defecto. Pero `frontend` usa una sola conexión por servicio, así que un límite bajo sesgaría la latencia. Si se aplica, que sea generoso (~1000), igual en A y en B, y medido antes en `kind`.
-- **Memoria de la JVM de `adservice`:** por defecto, el *heap* es el 25% del límite del contenedor. Si con carga en `kind` no basta, poner `-XX:MaxRAMPercentage=75` vía `JAVA_OPTS` (no `JAVA_TOOL_OPTIONS`: escribe una línea que no es JSON).
-- **`preStop` con una espera corta** (p. ej. `sleep 5`), más un `terminationGracePeriodSeconds` que cubra esa espera y los 10 s del apagado. El endpoint de un pod que se borra se retira de forma asíncrona.
-- **`frontend-external` (LoadBalancer)** expone `frontend` por HTTP por fuera del Ingress. Activar `components/non-public-frontend` en A y en B cuando exista el Ingress.
-- **`emailservice`:** el `Service` publica el puerto 5000 (`targetPort` 8080), heredado. Decidir si se iguala a 8080.
+**Pendientes en los manifiestos** (`kustomize/base` y `kubernetes-manifests/` siguen como en el original):
+- **Quitar el `loadgenerator` (Locust):** la base lo despliega y metería carga no controlada en todos los escenarios.
+- **Quitar variables y endpoints sin uso:** `DISABLE_PROFILER`/`ENABLE_PROFILER` en `kubernetes-manifests/` y `kustomize/base/` de 7 servicios; `SHOPPING_ASSISTANT_SERVICE_ADDR` en `frontend`.
+- **Imágenes:** usar las propias, de ACR; fijar `redis-cart` a `redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0` (igual que `compose.yaml`); quitar `kustomize/base/**` de los `ignorePaths` de Renovate.
+- **`redis-cart`** (igual en los 4): `--save ""` (sin instantáneas RDB: el `fork()` bajo carga da picos de latencia y riesgo de OOMKilled) y `--maxmemory` (p. ej. 200mb, por debajo del límite del pod) con `volatile-lru`. Sin `fork` no hace falta `vm.overcommit_memory`.
+- **`REQUEST_TIMEOUT` explícito en `frontend`**, igual en los 4.
+- **Requests y limits:** la base los trae en todos los Deployments; pasan al componente de seguridad (ver sección 1).
+- **Límite de streams gRPC por conexión:** grpc-go y grpc-js no lo limitan por defecto, pero `frontend` usa una sola conexión por servicio, así que un límite bajo sesgaría la latencia. Si se aplica, generoso (~1000), igual en los 4 y medido antes en `kind`.
+- **Memoria de la JVM de `adservice`:** el heap por defecto es el 25 % del límite. Si con carga no basta, `-XX:MaxRAMPercentage=75` vía `JAVA_OPTS` (no `JAVA_TOOL_OPTIONS`: escribe una línea que no es JSON).
+- **`emailservice`:** igualar el puerto del `Service` a 8080.
+- **`frontend-external` (LoadBalancer)** expone `frontend` por HTTP por fuera del Gateway: activar `components/non-public-frontend` en los 4 cuando exista el Gateway.
+- Los 10 servicios ya tienen en `base` `runAsNonRoot`, `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false` y `drop: [ALL]`; para PSA `restricted`, el componente de seguridad añade `seccompProfile` (y lo que falte en `redis-cart`).
 
 ## Tarea 9 — Probes y autoescalado ⏳
 
-Revisar las probes y añadir un HPA en `frontend`. En B, el `ResourceQuota` puede impedir que el HPA cree réplicas: no es un bug, es un dato comparativo (el blindaje limita la reacción del autoescalado).
+Revisar las probes (van en el componente de resiliencia). El HPA de `frontend` es una **demo aparte**, fuera del factorial (necesita requests y variaría la medida), con el Cluster Autoscaler activo. Si el `ResourceQuota` impide al HPA crear réplicas, es consecuencia de cómo se dimensionó: se dimensiona a propósito y se documenta, no se presenta como hallazgo.
 
 ## Tarea 10 — Pipeline de CD ⏳
 
-Al fusionar en `main`:
-1. Build y push de las 10 imágenes a ACR, con tag = SHA del commit (artefacto inmutable), y Trivy sobre ellas.
-2. **Namespace de staging efímero** en el mismo clúster: despliegue, `e2e/smoke.js` y borrado del namespace, pase o no. No se usa un clúster efímero: tardaría 15-20 min por cada merge.
-3. **Gate manual** (GitHub Environment con *required reviewer*; gratis porque el repo es público).
-4. Commit que actualiza el tag en el overlay correspondiente:
-   - **La promoción a B se bloquea si Trivy encuentra algo CRITICAL** (`--scanners vuln,secret --severity CRITICAL --exit-code 1`).
-   - La de A solo informa, y el dato queda para la comparativa.
-5. Argo CD sincroniza.
+El clúster está destruido casi siempre, así que el CD se parte en dos:
+
+**Siempre (al fusionar en `main`):**
+1. Build y push de las 10 imágenes a ACR con tag = SHA del commit (artefacto inmutable).
+2. Trivy sobre ellas. **Un único gate por SHA, igual para los 4 escenarios** (`--scanners vuln,secret --severity CRITICAL --exit-code 1`): el mismo SHA se promociona a todos.
+3. Firma con `cosign` keyless (OIDC de GitHub) y SBOM.
+
+**Solo si el clúster existe** (comprobado con `az aks show`) o por `workflow_dispatch`:
+4. **Namespace de staging efímero** en el mismo clúster, con el overlay D (el más restrictivo, para ver antes lo que bloquean las políticas): despliegue, `e2e/smoke.js` y borrado del namespace, pase o no. No se usa un clúster efímero: tardaría 15-20 min por merge.
+5. **Gate manual** (GitHub Environment con *required reviewer*; gratis porque el repo es público).
+6. Commit que actualiza el tag en los overlays. Durante el experimento, los 4 apuntan al mismo SHA congelado (`git tag`).
+7. Argo CD sincroniza.
 
 **Rollback:** `git revert` del commit del tag.
 
 **Además:**
-- Ingress Controller (nginx o AGIC) + `cert-manager` para TLS; después, `Secure` en las cookies de `frontend` y HSTS.
-- **Opcional:** firma con `cosign` + SBOM. Solo tiene sentido si también se verifica la firma (Kyverno `verifyImages` o `cosign verify`), con el mismo criterio de A informa / B bloquea.
+- **Kyverno `verifyImages`** exige la firma de `cosign`, solo en los namespaces con seguridad ON. Comprobar que también ve la imagen del sidecar que inyecta Istio (depende del orden de los webhooks de mutación). Se prueba antes en `kind` con un registro local y una clave de prueba (la firma *keyless* solo existe dentro de GitHub Actions).
+- **Imágenes de terceros** (`redis`, k6, `stress-ng`, el cliente de Redis de E3 y los proxies de Istio que corren en los namespaces de la app): se copian a ACR por digest y se firman igual, para que `verifyImages` y el registro de confianza cubran todo lo que corre en B y D.
+- **Gateway API + `cert-manager`** para TLS (sesión de Azure 2), con un controlador como Envoy Gateway (ingress-nginx está retirado desde marzo de 2026), el nombre gratuito `<etiqueta>.<región>.cloudapp.azure.com` y Let's Encrypt por HTTP-01; después, `Secure` en las cookies de `frontend` y HSTS.
 
 ## Tarea 11 — Pipeline de Infra ⏳
 
-Se dispara con los cambios en `terraform/` y aplica la Tarea 7. tfsec/checkov **bloquea solo en B**; en A informa, y ese dato es parte del eje comparativo del TFM.
+El `plan` y los escáneres (tflint, checkov, `trivy config`) corren en cada PR, dentro del CI (Tarea 6), y bloquean igual para todo: hay un único clúster. Este pipeline se lanza a mano (`workflow_dispatch`) con dos acciones: **levantar** el entorno (`apply`) y **cerrarlo** (exportar los resultados, Tarea 14, y `destroy`). Nunca aplica solo al fusionar: crearía el clúster fuera de una sesión y gastaría presupuesto.
 
 ## Tarea 12 — Pipeline de Experimento (`workflow_dispatch`) ⏳
 
-k6 (carga + usuario testigo, partiendo de `e2e/lib/shop.js`) y un script de inyección de fallos con `kubectl`, contra A y luego contra B. Desacoplado del CD, para repetir mediciones sin redesplegar.
+k6 (carga + usuario testigo, partiendo de `e2e/lib/shop.js`), Chaos Mesh (E2 y E2b) y `stress-ng` para inyectar fallos y contención de recursos, y los 4 escenarios (protocolo y variables fijadas en la sección 1). Desacoplado del CD, para repetir mediciones sin pasar por él. Las dos sesiones de campaña repiten los 4 escenarios y se redespliega el namespace entre ejecuciones. Cada ejecución es un job aparte (GitHub Actions corta los jobs a las 6 h).
 
-- **k6 corre dentro del clúster** contra el `ClusterIP` de `frontend` (`frontend.<namespace>.svc.cluster.local`), nunca a través del Ingress: medir pasando por Ingress, DNS y TLS añadiría latencia de esas capas.
-- **Protocolo:**
-  - A y B nunca en paralelo.
-  - Entre una ejecución y otra, esperar a que el autoscaler vuelva al mínimo de nodos.
-  - Métricas siempre filtradas por namespace.
-- **Fijado antes de medir e igual en A y B:**
-  - **`REQUEST_TIMEOUT`.**
-  - **`MAX_WORKERS`** de los servicios Python (por defecto 50 hilos y hasta 2×N llamadas en curso; las que sobran reciben `RESOURCE_EXHAUSTED` al instante).
-  - **Llamadas en paralelo por producto** en `frontend` y `checkoutservice`, con un máximo de 10 a la vez (`errgroup`): la latencia ya no es la suma de todas, a diferencia del Online Boutique original.
-  - **Sin reintentos automáticos:** ocultarían parte de los fallos inyectados.
-  - **Tipo de fallo:**
-    - `kubectl delete pod` es un fallo «educado»: con el apagado ordenado, el pod termina antes sus peticiones en curso.
-    - `--grace-period=0 --force` simula una caída real.
-    - Son dos experimentos distintos; citar en la memoria el que se use.
-  - **Microservicio objetivo fijo.**
-- **Si el objetivo es `redis-cart`:** con `FailFast`, un corte breve se ve como 503 inmediatos (más errores, menos latencia). Citarlo en la memoria.
-- **Si el objetivo es `shippingservice`:** habrá pedidos cobrados que el usuario ve fallar (ver limitaciones).
-- **N ≥ 3 repeticiones por escenario**: en Grafana, media/mediana y desviación, no un valor único.
+**Los escenarios nunca corren en paralelo**, las métricas se filtran siempre por namespace y, con Argo CD, se evita el `selfHeal` sobre `replicas` durante la campaña (ver Tarea 13).
+
+**Catálogo de fallos** (se construye entre las semanas 2 y 6; diez fallos diagnosticados y documentados): `OOMKilled`, `CrashLoopBackOff`, `Pending` por quota o recursos, probe mal configurada, fallo de DNS, `drain` de nodo con y sin PDB, NetworkPolicy que bloquea sin querer (incluido el tráfico del mesh), kill forzado de un pod, réplica desequilibrada con gRPC sin mesh y fallo gris (réplica `Ready` que da errores). Solo 2-3 entran en la campaña cuantitativa; el resto es análisis cualitativo (causa, señales, tiempo de recuperación). Ni `redis-cart` ni `shippingservice` son objetivo de E2, y la memoria explica por qué: matar el primero da 503 inmediatos por `FailFast` (más errores, menos latencia), y matar el segundo deja pedidos cobrados que el usuario ve fallar (ver limitaciones).
 
 ## Tarea 13 — GitOps con Argo CD ⏳
 
-**Argo CD, no Flux** (por su interfaz web para la defensa y `ApplicationSet` para la misma app con dos overlays), instalado dentro del mismo clúster. Un `ApplicationSet` despliega `base` en `boutique-baseline` y el overlay blindado en `boutique-hardened`. Terraform sigue siendo push. El CLI `helm` sí se usa (charts de `kube-prometheus-stack` y de Argo CD); la carpeta `helm-chart/` no. **Es la primera pieza recortable si falta tiempo**: no afecta a ningún resultado.
+**Argo CD, no Flux** (por su interfaz web para la defensa y `ApplicationSet` para la misma app con varios overlays), instalado dentro del mismo clúster, en el pool `sistema`. Un `ApplicationSet` con generador de lista despliega los 4 overlays. Terraform sigue siendo push. Es **parte del núcleo**: el CD y el experimento dependen de él.
+
+Durante la campaña, `ignoreDifferences` sobre `replicas` (o sincronización manual) para que el `selfHeal` no deshaga el escalado a 0 de los namespaces que no se miden. Los charts de Helm sí se usan (Argo CD, con `helm_release` desde Terraform; el resto, desde el *app-of-apps*); la carpeta `helm-chart/` no.
 
 ## Tarea 14 — Observabilidad (Prometheus + Grafana) ⏳
 
-**Sin instrumentar el código** (ningún servicio expone `/metrics`). Es una decisión de alcance: así las métricas son idénticas en A y B y no se añade carga a lo que se mide. Se pierde el detalle interno de cada servicio. Fuentes:
-- **CPU y memoria por pod/namespace:** cAdvisor.
-- **Estado, reinicios y vuelta a `Ready` (base del MTTR):** kube-state-metrics.
-- **Paquetes bloqueados (`cilium_drop_count_total`) y tráfico entre servicios:** Hubble.
-- **Método, código y latencia entre servicios:** Hubble L7. No viene activado y añade algo de latencia por el proxy: activarlo igual en A y en B.
+**Sin instrumentar el código** (ningún servicio expone `/metrics`): las métricas son idénticas en los 4 escenarios y no se añade carga a lo medido. Se pierde el detalle interno de cada servicio. Fuentes:
+- **CPU, memoria y *throttling* de CPU por pod/namespace:** cAdvisor.
+- **Estado, reinicios y vuelta a `Ready` (MTTR):** kube-state-metrics.
+- **Paquetes bloqueados:** métricas del agente de Cilium (`cilium_drop_count_total`; sin etiqueta de namespace, así que la evidencia de H2 es el resultado binario de la prueba, no esta métrica). Sin Hubble L7: añadiría latencia solo por observar.
+- **Tráfico entre servicios y circuit breaker:** telemetría de Istio (latencia y errores por servicio, expulsiones de réplicas). Recupera el detalle por servicio sin instrumentar el código, es igual en los 4 escenarios y es candidata para las métricas personalizadas.
 - **Latencia y errores vistos por el usuario:** k6 (`experimental-prometheus-rw`).
 
+**Persistencia:** dashboards como código (provisioning por ConfigMap); **antes de cada `destroy` se exportan los resultados** (k6 JSON y consultas a la API de Prometheus a CSV) y se versionan o se suben como artefacto. El análisis en Python lee esos ficheros, no Grafana.
+
 Dashboards: MTTR y **usuario testigo** (una compra pausada y constante mientras el resto de usuarios virtuales cargan el sistema, que mide los segundos que un cliente ve la tienda caída o lenta).
+
+**Métricas personalizadas (petición del tutor):** añadir 2-3 métricas que no vengan por defecto en kube-state-metrics, muy bien pensadas: cada una ligada a una hipótesis y obtenida sin instrumentar el código (*recording rules*, exporters o telemetría del mesh). Se deciden en esta fase, cada una con su ADR y el motivo, **como tarde en el piloto de la semana 8**: el pipeline de Experimento tiene que exportarlas desde la primera sesión de campaña.
+
+Stretch: Loki + Alloy para recoger los logs JSON.
 
 ---
 
 ## Limitaciones a mencionar en la memoria
 
-- **Cobro sin compensación:** `PlaceOrder` cobra y después envía. Si el envío falla, el cobro no se deshace: haría falta una *saga*, y `paymentservice` no tiene reembolsos. Es el diseño original.
-- **Tráfico interno sin cifrar (sin mTLS):** el eje medido es el aislamiento de red, no el cifrado. Hacerlo bien exigiría un *service mesh*, desproporcionado para este TFM.
-- **Sin gestión de secretos:** la app no tiene secretos. Si se añadiera Postgres, la cadena de conexión vendría de Key Vault (CSI driver).
+- **Cobro sin compensación:** `PlaceOrder` cobra y después envía. Si el envío falla, el cobro no se deshace (haría falta una *saga*; `paymentservice` no tiene reembolsos). Es el diseño original.
+- **Latencia del mesh:** los proxies añaden latencia en los 4 escenarios por igual. No sesga las comparaciones, pero los valores absolutos la incluyen; se cuantifica en el piloto.
+- **Circuit breaker solo en llamadas síncronas:** con colas de mensajes la resiliencia sería otra (broker, reintentos del consumidor); queda como trabajo futuro, igual que la versión HTTP de la tienda.
+- **Sin gestión de secretos:** la app no tiene secretos.
+- **Redis es un SPOF** en los 4 escenarios (1 réplica, sin replicación).
+- **Aislamiento blando:** namespaces con NetworkPolicy son multi-tenancy blanda, no aislamiento fuerte (nodos compartidos).
+- **Sin OpenTelemetry ni trazas:** decisión de alcance para no alterar lo medido.
+- **Un único clúster y un único proveedor:** los resultados dependen del hardware y del Cilium gestionado de AKS.
 
-## Mejoras opcionales
+## Stretch y opcionales
 
-- Postgres gestionado para `productcatalogservice` (es de solo lectura). Puramente demostrativo.
+- **SLOs y alertas** (el primero si sobra tiempo; 2-3 días): 1-2 SLOs (p. ej. compras completadas por el usuario testigo y p95), reglas de Alertmanager por *burn rate* y un runbook corto por alerta. E2 y E2b deberían dispararlas.
+- Gestión de secretos con External Secrets Operator y Azure Key Vault (la app no tiene secretos: con uno de demostración).
+- Operación del día a día: actualización de versión de AKS sin cortar el servicio y copia y restauración con Velero.
+- Argo Rollouts (despliegue canary con análisis de métricas), mejor después del TFM.
+- Loki + Alloy; Tetragon.
+- Mini-operador con Kubebuilder (un CRD que declare un escenario del experimento): el mejor ejercicio para entender controllers.
+- Preparar CKA/CKAD/CKS (el temario encaja; el examen cuesta ~400 $, aparte del presupuesto de Azure).
+- Postgres gestionado para `productcatalogservice` (solo demostrativo).
 
 ## Descartado (no reconsiderar sin motivo nuevo)
 
-- Entornos efímeros por PR: el staging de la Tarea 10 cubre lo mismo.
-- Releases formales (semantic-release): basta con `git tag` al congelar cada escenario.
+- Entornos efímeros por PR (el staging de la Tarea 10 cubre lo mismo) y clúster efímero por merge.
+- Releases formales: basta con `git tag` al congelar el SHA de la campaña.
 - Flux, o Flux además de Argo CD.
 - Copiar `src/` a un repo nuevo.
 - Guardar el carrito en una base de datos: no hay cuentas de usuario, así que Redis con caducidad es el diseño correcto.
-- Testcontainers para `cartservice` (ver `e2e/`).
+- Testcontainers para `cartservice` (lo cubren `cart-concurrent.js` y `redis-down.js`).
+- Hubble L7, ACNS y OpenTelemetry. (El mesh también añade latencia, pero es objeto de estudio y está igual en los 4 escenarios; Hubble L7 solo observaría.)
+- Mesh como tercer factor (2×2×2) o solo en C y D (ver sección 1). Linkerd (versiones estables de pago), el mesh de Cilium (en AKS gestionado no se configuran circuit breakers) y el add-on de Istio de AKS como primera opción (`kind` y AKS deben ser idénticos; queda de reserva, Tarea 4). Istio ambient: el add-on de AKS no lo soporta y sobre el Cilium gestionado exige ajustes que quizá no se puedan tocar.
+- Tres proyectos (gRPC, HTTP y colas): se hace solo Online Boutique en gRPC. Si el tutor lo sigue pidiendo, se migra a HTTP después de la campaña y se repite (el pipeline de Experimento lo hace barato), lo que da una comparación de protocolos con la misma lógica de negocio.
+- k6 Operator (basta un Job) y `vm.overcommit_memory` (sin `fork` no hace falta).
+- ingress-nginx: retirado desde marzo de 2026; se usa Gateway API.
 
 ## Verificación continua
 
-- Tras cada fase, `e2e/run.sh` en verde, y el overlay correspondiente desplegando los 10 servicios.
+- Tras cada fase, `e2e/run.sh` en verde y el overlay correspondiente desplegando los 10 servicios.
 - Ningún workflow ni documento debe referenciar ficheros borrados.
