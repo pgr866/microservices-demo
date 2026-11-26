@@ -77,7 +77,7 @@ Cada factor es un *component* de Kustomize; cada escenario, un overlay con su na
 - ✅ **Tareas 1-3:** fork limpio, los 10 microservicios puestos a punto en local y tests de punta a punta en `e2e/` (falta engancharlos al CI). Detalle en la sección 3. Código de servicios **congelado**: no se añade nada nuevo.
 - 🔄 **Tarea 4:** en curso. Hecho: clúster `kind` con Cilium (`kind/`).
 - ⏳ **Tareas 5-14:** diseñadas, sin implementar.
-- **Ramas:** una por tarea, creada desde `main` y fusionada por PR con *merge commit* (sin squash, para conservar sus commits); `main` no recibe commits directos.
+- **Ramas:** una por bloque de trabajo (una tarea corta, o un tema de una larga como la 4: clúster, workloads, recursos…), para que cada PR sea pequeña y `main` avance cada pocos días. Se crea desde `main` y se fusiona por PR con *merge commit* (sin squash, para conservar sus commits); `main` no recibe commits directos.
 - **Orden:** todo lo que no cuesta dinero primero (`kind`, CI, `terraform plan`). El primer `terraform apply` va en la semana 7; antes solo se crean, con `az`, el almacenamiento del estado y la identidad OIDC (Tarea 5).
 
 | Sem. | Kubernetes y experimento | CI / CD / Terraform en paralelo |
