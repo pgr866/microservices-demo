@@ -195,9 +195,48 @@ services:
       productcatalogservice:
         condition: service_healthy
 
+  checkoutservice:
+    container_name: checkoutservice
+    build:
+      context: ./src/checkoutservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/checkoutservice:/app
+      - checkoutservice_cache:/cache
+    ports:
+      - "5050:5050"
+    environment:
+      PORT: "5050"
+      LOG_LEVEL: "debug"
+      SHIPPING_SERVICE_ADDR: "shippingservice:50051"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+      CART_SERVICE_ADDR: "cartservice:7070"
+      CURRENCY_SERVICE_ADDR: "currencyservice:7000"
+      EMAIL_SERVICE_ADDR: "emailservice:8080"
+      PAYMENT_SERVICE_ADDR: "paymentservice:50052"
+    healthcheck: *healthcheck
+    depends_on:
+      shippingservice:
+        condition: service_healthy
+      productcatalogservice:
+        condition: service_healthy
+      cartservice:
+        condition: service_healthy
+      currencyservice:
+        condition: service_healthy
+      emailservice:
+        condition: service_healthy
+      paymentservice:
+        condition: service_healthy
+
 volumes:
   productcatalogservice_cache:
   shippingservice_cache:
+  checkoutservice_cache:
   paymentservice_node_modules:
   currencyservice_node_modules:
   adservice_gradle_home:
