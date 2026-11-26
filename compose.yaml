@@ -29,5 +29,25 @@ services:
       LOG_LEVEL: "debug"
     healthcheck: *healthcheck
 
+  shippingservice:
+    container_name: shippingservice
+    build:
+      context: ./src/shippingservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/shippingservice:/app
+      - shippingservice_cache:/cache
+    ports:
+      - "50051:50051"
+    environment:
+      PORT: "50051"
+      LOG_LEVEL: "debug"
+    healthcheck: *healthcheck
+
 volumes:
   productcatalogservice_cache:
+  shippingservice_cache:
