@@ -1,0 +1,43 @@
+# Cilium on kind, set up like Azure CNI Powered by Cilium and ready for the
+# Istio sidecars. Chart version in up.sh.
+
+# No kube-proxy (as in AKS): Cilium resolves Services with eBPF. Without
+# kube-proxy the kubernetes Service doesn't work yet when Cilium starts, so the
+# agent reaches the API server straight at the control plane container.
+kubeProxyReplacement: true
+k8sServiceHost: boutique-control-plane
+k8sServicePort: 6443
+
+# Pod IPs from the range Kubernetes gives each node (podSubnet in cluster.yaml).
+ipam:
+  mode: kubernetes
+
+# Native routing, no tunnel, as in AKS: the nodes share a Docker network, so each
+# one gets a route to the pod range of the others.
+routingMode: native
+autoDirectNodeRoutes: true
+ipv4NativeRoutingCIDR: 10.244.0.0/16
+
+# What Istio needs with kube-proxy replaced:
+# - Service resolution at the socket only for host-network processes. In a pod
+#   it would rewrite the Service IP to a pod IP before the sidecar sees the
+#   connection, and the mesh would apply neither its load balancing nor its
+#   circuit breaker, without any error.
+# - Cilium doesn't own the CNI config, so istio-cni can chain onto it.
+socketLB:
+  hostNamespaceOnly: true
+cni:
+  exclusive: false
+
+# Hubble and L7 policies come with ACNS (paid) in AKS, so they're off here too.
+# L7 (by mesh identity) is Istio's job; Cilium stays at L3/L4. Without L7
+# policies the Envoy DaemonSet of Cilium has nothing to do.
+hubble:
+  enabled: false
+l7Proxy: false
+envoy:
+  enabled: false
+
+# The default 2 replicas only add load to a local cluster.
+operator:
+  replicas: 1

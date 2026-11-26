@@ -59,6 +59,8 @@ Each service has a devcontainer in [`.devcontainer/<service>`](/.devcontainer) t
 
 ### Kubernetes
 
+[`kind/`](/kind/README.md) creates a local multi-node cluster with Cilium, set up like the AKS one (`./kind/up.sh`). On a cluster:
+
 ```sh
 kubectl apply -k kustomize/
 kubectl get pods
