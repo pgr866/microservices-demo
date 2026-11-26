@@ -1,0 +1,36 @@
+{
+  "name": "emailservice",
+  "dockerComposeFile": "../../compose.yaml",
+  "initializeCommand": "echo DOCKER_GID=$(stat -c %g /var/run/docker.sock) > .env",
+  "service": "emailservice",
+  "runServices": ["emailservice"],
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=/usr/bin/docker,target=/usr/bin/docker,type=bind,readonly",
+    "source=/usr/libexec/docker/cli-plugins,target=/usr/libexec/docker/cli-plugins,type=bind,readonly",
+    "source=${localWorkspaceFolder},target=/workspace,type=bind"
+  ],
+  "remoteEnv": {
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_0": "git@github.com:"
+  },
+  "workspaceFolder": "/workspace/src/emailservice",
+  "overrideCommand": true,
+  "postStartCommand": ["watchmedo", "auto-restart", "--directory=.", "--pattern=*.py", "--recursive", "--", "python", "email_server.py"],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true
+        },
+        "git.openRepositoryInParentFolders": "always",
+        "python.testing.pytestEnabled": true,
+        "ruff.importStrategy": "fromEnvironment",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": ["ms-python.python", "charliermarsh.ruff"]
+    }
+  }
+}

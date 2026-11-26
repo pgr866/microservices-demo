@@ -12,33 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Define a default value so it's not empty if the builder fails to provide it
-ARG BUILDPLATFORM=linux/amd64
-
-FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS builder
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
-WORKDIR /src
-
-# restore dependencies
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /go/bin/shippingservice .
 
-# Skaffold passes in debug-oriented compiler flags
-ARG SKAFFOLD_GO_GCFLAGS
-RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} CGO_ENABLED=0 go build -ldflags="-s -w" -gcflags="${SKAFFOLD_GO_GCFLAGS}" -o /go/bin/shippingservice .
-
-FROM gcr.io/distroless/static
-
-WORKDIR /src
-COPY --from=builder /go/bin/shippingservice /src/shippingservice
-ENV APP_PORT=50051
-
-# Definition of this variable is used by 'skaffold debug' to identify a golang binary.
-# Default behavior - a failure prints a stack trace for the current goroutine.
-# See https://golang.org/pkg/runtime/
-ENV GOTRACEBACK=single
-
+FROM gcr.io/distroless/static:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931
+WORKDIR /app
+COPY --from=builder /go/bin/shippingservice /app/shippingservice
+USER 65532:65532
 EXPOSE 50051
-ENTRYPOINT ["/src/shippingservice"]
+# The Kubernetes probes check health.
+HEALTHCHECK NONE
+ENTRYPOINT ["/app/shippingservice"]

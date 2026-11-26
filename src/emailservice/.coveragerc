@@ -1,0 +1,6 @@
+[run]
+source = .
+branch = True
+omit =
+    demo_pb2*.py
+    test_*.py

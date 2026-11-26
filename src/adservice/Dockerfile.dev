@@ -1,0 +1,75 @@
+# One stage per README command, plus dev (hot reload).
+
+FROM eclipse-temurin:25.0.5.1_2-jdk-alpine-3.24@sha256:22edbb1021420ae6e248519d1af07577742314d67d4c60fcbb2e285b7e47fa78 AS base
+RUN apk upgrade --no-cache && apk add --no-cache gcompat
+WORKDIR /app
+ADD --chmod=644 --checksum=sha256:c78feb48c549fa7114b7ea11db3b456808f7b371ffe84e6643a44dd2f9588639 \
+    https://github.com/google/google-java-format/releases/download/v2.0.0/google-java-format-2.0.0-all-deps.jar /opt/google-java-format.jar
+COPY --chmod=755 <<"EOF" /usr/local/bin/google-java-format
+#!/bin/sh
+exec java --add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED \
+  --add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED \
+  --add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED \
+  --add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED \
+  --add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED \
+  --add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED \
+  -jar /opt/google-java-format.jar "$@"
+EOF
+
+FROM base AS deps
+COPY build.gradle settings.gradle gradlew ./
+COPY gradle gradle
+COPY src/main/proto src/main/proto
+# Own layer: keeps the generated proto code until the build files change.
+RUN --mount=type=cache,id=gradle,target=/root/.gradle,sharing=locked ./gradlew downloadDependencies generateProto --no-daemon
+
+FROM deps AS source
+COPY . .
+
+FROM source AS test-run
+RUN --mount=type=cache,id=gradle,target=/root/.gradle,sharing=locked ./gradlew test --no-daemon
+FROM scratch AS test
+COPY --from=test-run /app/build/test-results/test/*.xml /reports/
+
+FROM source AS coverage-run
+RUN --mount=type=cache,id=gradle,target=/root/.gradle,sharing=locked ./gradlew jacocoTestReport --no-daemon
+FROM scratch AS coverage
+COPY --from=coverage-run /app/build/reports/jacoco/test/jacocoTestReport.xml /reports/
+
+FROM source AS lint
+RUN --mount=type=cache,id=gradle,target=/root/.gradle,sharing=locked ./gradlew checkstyleMain checkstyleTest --continue --no-daemon
+
+FROM source AS format-run
+RUN google-java-format --replace $(find src -name "*.java") && mkdir /out && find src -name '*.java' | xargs -I{} cp --parents {} /out
+FROM scratch AS format
+COPY --from=format-run /out/ /
+
+FROM source AS format-check
+RUN google-java-format --dry-run --set-exit-if-changed $(find src -name "*.java")
+
+FROM source AS dependencies-run
+RUN --mount=type=cache,id=gradle,target=/root/.gradle,sharing=locked ./gradlew dependencies --configuration runtimeClasspath --no-daemon \
+    && ./gradlew wrapper --gradle-version 9.9.2 --no-daemon && sed -i 's/\r$//' gradlew.bat
+FROM scratch AS dependencies
+COPY --from=dependencies-run /app/gradle/ /gradle/
+COPY --from=dependencies-run /app/gradlew /app/gradlew.bat /
+
+FROM base AS codegen-run
+WORKDIR /repo/src/app
+COPY --from=protos . /repo/protos
+COPY . .
+RUN sh genproto.sh
+FROM scratch AS codegen
+COPY --from=codegen-run /repo/src/app/src/main/proto/demo.proto /src/main/proto/
+
+FROM base AS dev
+COPY --from=fullstorydev/grpcurl:v1.9.3-alpine@sha256:4614424ed58e9b9837c48b6b8eadb9ef40491d5af3499bcc8b378e9c64a9e4a9 /bin/grpcurl /usr/local/bin/
+# Mount points of the named volumes, pre-created so that the volumes belong to dev.
+RUN apk add --no-cache watchexec git bash \
+    && adduser -D -u 1000 dev \
+    && install -d -o dev -g dev /home/dev/.gradle .gradle build \
+       /workspace/src/adservice/.gradle /workspace/src/adservice/build
+USER dev
+# compose.yaml checks health.
+HEALTHCHECK NONE
+ENTRYPOINT ["watchexec", "--restart", "--poll", "2s", "--watch", "src", "--watch", "build.gradle", "--", "./gradlew", "run", "--no-daemon"]

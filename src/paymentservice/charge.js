@@ -12,75 +12,105 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+const crypto = require('node:crypto');
+const { status } = require('@grpc/grpc-js');
 const cardValidator = require('simple-card-validator');
-const { v4: uuidv4 } = require('uuid');
-const pino = require('pino');
+const logger = require('./logger')('paymentservice-charge');
 
-const logger = pino({
-  name: 'paymentservice-charge',
-  messageKey: 'message',
-  formatters: {
-    level (logLevelString, logLevelNum) {
-      return { severity: logLevelString }
-    }
-  }
-});
-
-
-class CreditCardError extends Error {
-  constructor (message) {
+class InvalidArgumentError extends Error {
+  constructor(message) {
     super(message);
-    this.code = 400; // Invalid argument error
+    this.code = status.INVALID_ARGUMENT;
   }
 }
 
-class InvalidCreditCard extends CreditCardError {
-  constructor (cardType) {
-    super(`Credit card info is invalid`);
+class InvalidCreditCard extends InvalidArgumentError {
+  constructor() {
+    super('Credit card info is invalid');
   }
 }
 
-class UnacceptedCreditCard extends CreditCardError {
-  constructor (cardType) {
-    super(`Sorry, we cannot process ${cardType} credit cards. Only VISA or MasterCard is accepted.`);
+class UnacceptedCreditCard extends InvalidArgumentError {
+  constructor(cardType) {
+    super(
+      `Sorry, we cannot process ${cardType} credit cards. Only VISA or MasterCard is accepted.`,
+    );
   }
 }
 
-class ExpiredCreditCard extends CreditCardError {
-  constructor (number, month, year) {
-    super(`Your credit card (ending ${number.substr(-4)}) expired on ${month}/${year}`);
+class ExpiredCreditCard extends InvalidArgumentError {
+  constructor(number, month, year) {
+    super(
+      `Your credit card (ending ${number.slice(-4)}) expired on ${month}/${year}`,
+    );
   }
 }
 
-/**
- * Verifies the credit card number and (pretend) charges the card.
- *
- * @param {*} request
- * @return transaction_id - a random uuid.
- */
-module.exports = function charge (request) {
+class InvalidAmount extends InvalidArgumentError {
+  constructor() {
+    super('The amount to charge must be positive and have a currency code');
+  }
+}
+
+// A negative amount would in effect be a refund; google.type.Money also
+// forbids units and nanos with different signs.
+function isPositiveAmount(amount) {
+  if (!amount?.currency_code) {
+    return false;
+  }
+  const units = Number(amount.units);
+  const nanos = Number(amount.nanos);
+  return (units > 0 && nanos >= 0) || (units === 0 && nanos > 0);
+}
+
+// In cents, zero-padded: 0.05 is 50000000 nanos.
+function formatAmount({ currency_code: currency, units, nanos }) {
+  const cents = String(Math.floor(nanos / 10000000)).padStart(2, '0');
+  return `${currency} ${units}.${cents}`;
+}
+
+// Validates the card and only pretends to charge it: no payment is made.
+module.exports = function charge(request) {
   const { amount, credit_card: creditCard } = request;
+  if (!isPositiveAmount(amount)) {
+    throw new InvalidAmount();
+  }
+  // simple-card-validator throws a plain Error without a number.
+  if (!creditCard?.credit_card_number) {
+    throw new InvalidCreditCard();
+  }
   const cardNumber = creditCard.credit_card_number;
-  const cardInfo = cardValidator(cardNumber);
+  const { card_type: cardType, valid } =
+    cardValidator(cardNumber).getCardDetails();
+
+  if (!valid) {
+    throw new InvalidCreditCard();
+  }
+
+  if (cardType !== 'visa' && cardType !== 'mastercard') {
+    throw new UnacceptedCreditCard(cardType);
+  }
+
   const {
-    card_type: cardType,
-    valid
-  } = cardInfo.getCardDetails();
+    credit_card_expiration_year: year,
+    credit_card_expiration_month: month,
+  } = creditCard;
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw new InvalidCreditCard();
+  }
 
-  if (!valid) { throw new InvalidCreditCard(); }
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+  if (!!(currentYear * 12 + currentMonth > year * 12 + month)) {
+    throw new ExpiredCreditCard(cardNumber, month, year);
+  }
 
-  // Only VISA and mastercard is accepted, other card types (AMEX, dinersclub) will
-  // throw UnacceptedCreditCard error.
-  if (!(cardType === 'visa' || cardType === 'mastercard')) { throw new UnacceptedCreditCard(cardType); }
+  logger.info(
+    `Transaction processed: ${cardType} ending ${cardNumber.slice(-4)}, amount ${formatAmount(amount)}`,
+  );
 
-  // Also validate expiration is > today.
-  const currentMonth = new Date().getMonth() + 1;
-  const currentYear = new Date().getFullYear();
-  const { credit_card_expiration_year: year, credit_card_expiration_month: month } = creditCard;
-  if ((currentYear * 12 + currentMonth) > (year * 12 + month)) { throw new ExpiredCreditCard(cardNumber.replace('-', ''), month, year); }
-
-  logger.info(`Transaction processed: ${cardType} ending ${cardNumber.substr(-4)} \
-    Amount: ${amount.currency_code}${amount.units}.${amount.nanos}`);
-
-  return { transaction_id: uuidv4() };
+  return { transaction_id: crypto.randomUUID() };
 };
+
+module.exports.logger = logger;

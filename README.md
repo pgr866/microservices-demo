@@ -1,8 +1,3 @@
-<!-- <p align="center">
-<img src="/src/frontend/static/icons/Hipster_HeroLogoMaroon.svg" width="300" alt="Online Boutique" />
-</p> -->
-![Continuous Integration](https://github.com/GoogleCloudPlatform/microservices-demo/workflows/Continuous%20Integration%20-%20Main/Release/badge.svg)
-
 **Online Boutique** is a cloud-first microservices demo application.  The application is a
 web-based e-commerce app where users can browse items, add them to the cart, and purchase them.
 
@@ -42,98 +37,40 @@ Find **Protocol Buffers Descriptions** at the [`./protos` directory](/protos).
 | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | [![Screenshot of store homepage](/docs/img/online-boutique-frontend-1.png)](/docs/img/online-boutique-frontend-1.png) | [![Screenshot of checkout screen](/docs/img/online-boutique-frontend-2.png)](/docs/img/online-boutique-frontend-2.png) |
 
-## Quickstart (GKE)
+## Quickstart
 
-1. Ensure you have the following requirements:
-   - [Google Cloud project](https://cloud.google.com/resource-manager/docs/creating-managing-projects#creating_a_project).
-   - Shell environment with `gcloud`, `git`, and `kubectl`.
+### Local development (Docker Compose)
 
-2. Clone the latest major version.
+[`compose.yaml`](/compose.yaml) runs the 10 services (plus `redis-cart`) with hot reload, built from each service's `Dockerfile.dev`:
 
-   ```sh
-   git clone --depth 1 --branch v0 https://github.com/GoogleCloudPlatform/microservices-demo.git
-   cd microservices-demo/
-   ```
+```sh
+docker compose up --build
+```
 
-   The `--depth 1` argument skips downloading git history.
+The shop is then at `http://localhost:8082`. `docker compose up <service>` starts a single service and the services it depends on. Each service's README (`src/<service>/README.md`) has the commands for tests, coverage, linter and formatting, which run as stages of its `Dockerfile.dev` (`docker build -f Dockerfile.dev --target <stage> .`).
 
-3. Set the Google Cloud project and region and ensure the Google Kubernetes Engine API is enabled.
+### Devcontainers
 
-   ```sh
-   export PROJECT_ID=<PROJECT_ID>
-   export REGION=us-central1
-   gcloud services enable container.googleapis.com \
-     --project=${PROJECT_ID}
-   ```
+Each service has a devcontainer in [`.devcontainer/<service>`](/.devcontainer) that reuses its `compose.yaml` service; open it from VS Code with *Dev Containers: Reopen in Container*. It is the recommended way to work on a service: it starts it with hot reload and gives access to the host's Docker, so every command in the service READMEs runs from inside. The group that owns the Docker socket (`DOCKER_GID`) is found on every start: the devcontainer's `initializeCommand` writes it to `.env`. The one thing to set on the host is `BUILDX_BAKE_ENTITLEMENTS_FS=0`, in the environment VS Code starts from (e.g. in `~/.profile`): Compose builds with Bake, which otherwise refuses to read the Dockerfile that the Dev Containers extension generates outside the build context.
 
-   Substitute `<PROJECT_ID>` with the ID of your Google Cloud project.
+### End-to-end tests
 
-4. Create a GKE cluster and get the credentials for it.
+[`e2e/`](/e2e/README.md) runs the shop with the production images and checks it with [k6](https://k6.io) (`./e2e/run.sh`).
 
-   ```sh
-   gcloud container clusters create-auto online-boutique \
-     --project=${PROJECT_ID} --region=${REGION} \
-     --labels dev-tutorial=online-boutique
-   ```
+### Kubernetes
 
-   Creating the cluster may take a few minutes.
+```sh
+kubectl apply -k kustomize/
+kubectl get pods
+kubectl get service frontend-external
+```
 
-5. Deploy Online Boutique to the cluster.
-
-   ```sh
-   kubectl apply -f ./release/kubernetes-manifests.yaml
-   ```
-
-6. Wait for the pods to be ready.
-
-   ```sh
-   kubectl get pods
-   ```
-
-   After a few minutes, you should see the Pods in a `Running` state:
-
-   ```
-   NAME                                     READY   STATUS    RESTARTS   AGE
-   adservice-76bdd69666-ckc5j               1/1     Running   0          2m58s
-   cartservice-66d497c6b7-dp5jr             1/1     Running   0          2m59s
-   checkoutservice-666c784bd6-4jd22         1/1     Running   0          3m1s
-   currencyservice-5d5d496984-4jmd7         1/1     Running   0          2m59s
-   emailservice-667457d9d6-75jcq            1/1     Running   0          3m2s
-   frontend-6b8d69b9fb-wjqdg                1/1     Running   0          3m1s
-   loadgenerator-665b5cd444-gwqdq           1/1     Running   0          3m
-   paymentservice-68596d6dd6-bf6bv          1/1     Running   0          3m
-   productcatalogservice-557d474574-888kr   1/1     Running   0          3m
-   recommendationservice-69c56b74d4-7z8r5   1/1     Running   0          3m1s
-   redis-cart-5f59546cdd-5jnqf              1/1     Running   0          2m58s
-   shippingservice-6ccc89f8fd-v686r         1/1     Running   0          2m58s
-   ```
-
-7. Access the web frontend in a browser using the frontend's external IP.
-
-   ```sh
-   kubectl get service frontend-external | awk '{print $4}'
-   ```
-
-   Visit `http://EXTERNAL_IP` in a web browser to access your instance of Online Boutique.
-
-8. Congrats! You've deployed the default Online Boutique. To deploy a different variation of Online Boutique (e.g., with Google Cloud Operations tracing, Istio, etc.), see [Deploy Online Boutique variations with Kustomize](#deploy-online-boutique-variations-with-kustomize).
-
-9. Once you are done with it, delete the GKE cluster.
-
-   ```sh
-   gcloud container clusters delete online-boutique \
-     --project=${PROJECT_ID} --region=${REGION}
-   ```
-
-   Deleting the cluster may take a few minutes.
+Note: the manifests still use the images published by the upstream project; images built from this fork will come with the CD pipeline.
 
 ## Additional deployment options
 
-- **Terraform**: [See these instructions](/terraform) to learn how to deploy Online Boutique using [Terraform](https://www.terraform.io/intro).
-- **Istio / Cloud Service Mesh**: [See these instructions](/kustomize/components/service-mesh-istio/README.md) to deploy Online Boutique alongside an Istio-backed service mesh.
-- **Non-GKE clusters (Minikube, Kind, etc)**: See the [Development guide](/docs/development-guide.md) to learn how you can deploy Online Boutique on non-GKE clusters.
-- **AI assistant using Gemini**: [See these instructions](/kustomize/components/shopping-assistant/README.md) to deploy a Gemini-powered AI assistant that suggests products to purchase based on an image.
-- **And more**: The [`/kustomize` directory](/kustomize) contains instructions for customizing the deployment of Online Boutique with other variations.
+- **Istio**: [See these instructions](/kustomize/components/service-mesh-istio/README.md) to deploy Online Boutique alongside an Istio-backed service mesh.
+- **Variations**: The [`/kustomize` directory](/kustomize) contains instructions for customizing the deployment of Online Boutique with other variations.
 
 ## Documentation
 

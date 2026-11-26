@@ -72,12 +72,12 @@ spec:
             readOnlyRootFilesystem: true
           image: {{ .Values.images.repository }}/{{ .Values.frontend.name }}:{{ .Values.images.tag | default .Chart.AppVersion }}
           ports:
-          - containerPort: 8080
+          - containerPort: 8082
           readinessProbe:
             initialDelaySeconds: 10
             httpGet:
               path: "/_healthz"
-              port: 8080
+              port: 8082
               httpHeaders:
               - name: "Cookie"
                 value: "shop_session-id=x-readiness-probe"
@@ -85,13 +85,13 @@ spec:
             initialDelaySeconds: 10
             httpGet:
               path: "/_healthz"
-              port: 8080
+              port: 8082
               httpHeaders:
               - name: "Cookie"
                 value: "shop_session-id=x-liveness-probe"
           env:
           - name: PORT
-            value: "8080"
+            value: "8082"
           - name: PRODUCT_CATALOG_SERVICE_ADDR
             value: "{{ .Values.productCatalogService.name }}:3550"
           - name: CURRENCY_SERVICE_ADDR
@@ -99,7 +99,7 @@ spec:
           - name: CART_SERVICE_ADDR
             value: "{{ .Values.cartService.name }}:7070"
           - name: RECOMMENDATION_SERVICE_ADDR
-            value: "{{ .Values.recommendationService.name }}:8080"
+            value: "{{ .Values.recommendationService.name }}:8081"
           - name: SHIPPING_SERVICE_ADDR
             value: "{{ .Values.shippingService.name }}:50051"
           - name: CHECKOUT_SERVICE_ADDR
@@ -147,7 +147,7 @@ spec:
   ports:
   - name: http
     port: 80
-    targetPort: 8080
+    targetPort: 8082
 {{- if .Values.frontend.externalService }}
 ---
 apiVersion: v1
@@ -162,7 +162,7 @@ spec:
   ports:
   - name: http
     port: 80
-    targetPort: 8080
+    targetPort: 8082
 {{- end }}
 {{- if .Values.networkPolicies.create }}
 ---
@@ -195,7 +195,7 @@ spec:
           {{ .Values.frontend.virtualService.gateway.labelKey }}: {{ .Values.frontend.virtualService.gateway.labelValue }}
     {{- end }}
     ports:
-     - port: 8080
+     - port: 8082
        protocol: TCP
   {{- end }}
   egress:
@@ -259,7 +259,7 @@ spec:
         - GET
         - POST
         ports:
-        - "8080"
+        - "8082"
 {{- end }}
 {{- if .Values.frontend.virtualService.create }}
 ---

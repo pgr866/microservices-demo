@@ -1,131 +1,47 @@
-# Development Guide 
+# Development Guide
 
-This doc explains how to build and run the Online Boutique source code locally using the `skaffold` command-line tool.  
+This doc explains how to build, run and test the Online Boutique source code locally.
 
 ## Prerequisites
 
-- [Docker for Desktop](https://www.docker.com/products/docker-desktop)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/) (can be installed via `gcloud components install kubectl` for Option 1 - GKE)
-- [skaffold **2.0.2+**](https://skaffold.dev/docs/install/) (latest version recommended), a tool that builds and deploys Docker images in bulk. 
-- Clone the repository.
-    ```sh
-    git clone https://github.com/GoogleCloudPlatform/microservices-demo
-    cd microservices-demo/
-    ```
-- A Google Cloud project with Google Container Registry enabled. (for Option 1 - GKE)
-- [Minikube](https://minikube.sigs.k8s.io/docs/start/) (optional for Option 2 - Local Cluster)
-- [Kind](https://kind.sigs.k8s.io/) (optional for Option 2 - Local Cluster)
+- [Docker](https://docs.docker.com/get-docker/) with Docker Compose v2.
+- Optional: [VS Code](https://code.visualstudio.com/) with the Dev Containers extension, and `kubectl` plus a local cluster (e.g. [kind](https://kind.sigs.k8s.io/)) to try the Kubernetes manifests.
 
-## Option 1: Google Kubernetes Engine (GKE)
+## Run the app locally
 
-> 💡 Recommended if you're using Google Cloud and want to try it on
-> a realistic cluster. **Note**: If your cluster has Workload Identity enabled, 
-> [see these instructions](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity#enable)
+From the root of the repository:
 
-1.  Create a Google Kubernetes Engine cluster and make sure `kubectl` is pointing
-    to the cluster.
+```sh
+docker compose up --build
+```
 
-    ```sh
-    gcloud services enable container.googleapis.com
-    ```
+[`compose.yaml`](/compose.yaml) builds each service from its `Dockerfile.dev` (last stage, `dev`) with hot reload, plus `redis-cart`. The shop is at `http://localhost:8082`. To start a single service and the services it depends on, run `docker compose up <service>`.
 
-    ```sh
-    gcloud container clusters create-auto online-boutique --region=us-central1 --labels dev-tutorial=online-boutique
-    ```
+## Work on a single service
 
-    ```
-    kubectl get nodes
-    ```
+Each service's README (`src/<service>/README.md`) lists its commands. Tests, coverage, linter, formatting, dependency updates and code generation are stages of its `Dockerfile.dev`:
 
-2.  Enable Artifact Registry (AR) on your GCP project and configure the
-    `docker` CLI to authenticate to AR:
+```sh
+cd src/<service>
+docker build -f Dockerfile.dev --target test .
+```
 
-    ```sh
-    gcloud services enable artifactregistry.googleapis.com
-    ```
+Stages that produce files (reports, formatted code, generated code) write them to the folder with `--output type=local,dest=.`.
 
-    ```sh
-    gcloud artifacts repositories create microservices-demo \
-      --repository-format=docker \
-      --location=us \
-    ```
+Each service also has a devcontainer in [`.devcontainer/<service>`](/.devcontainer) that reuses its `compose.yaml` service.
 
-    ```sh
-    gcloud auth configure-docker -q 
-    ```
+## End-to-end tests
 
-3.  In the root of this repository, run:
+See [`e2e/README.md`](/e2e/README.md): the shop with the production images, checked with k6.
 
-    ```
-    skaffold run --default-repo=us-docker.pkg.dev/PROJECT_ID/microservices-demo
-    ```
-    
-    Where `PROJECT_ID` is replaced by your Google Cloud project ID.
+## Deploy to Kubernetes
 
-    This command:
+```sh
+kubectl apply -k kustomize/
+```
 
-    - Builds the container images.
-    - Pushes them to AR.
-    - Applies the `./kubernetes-manifests` deploying the application to
-      Kubernetes.
-
-    **Troubleshooting:** If you get "No space left on device" error on Google
-    Cloud Shell, you can build the images on Google Cloud Build: [Enable the
-    Cloud Build
-    API](https://console.cloud.google.com/flows/enableapi?apiid=cloudbuild.googleapis.com),
-    then run `skaffold run -p gcb --default-repo=us-docker.pkg.dev/[PROJECT_ID]/microservices-demo` instead.
-
-4.  Find the IP address of your application, then visit the application on your
-    browser to confirm installation.
-
-        kubectl get service frontend-external
-
-5.  Navigate to `http://EXTERNAL-IP` to access the web frontend.
-
-## Option 2 - Local Cluster 
-
-1. Launch a local Kubernetes cluster with one of the following tools:
-
-    - To launch **Minikube** (tested with Ubuntu Linux). Please, ensure that the
-       local Kubernetes cluster has at least:
-        - 4 CPUs
-        - 4.0 GiB memory
-        - 32 GB disk space
-
-      ```shell
-      minikube start --cpus=4 --memory 4096 --disk-size 32g
-      ```
-
-    - To launch **Docker for Desktop** (tested with Mac/Windows). Go to Preferences:
-        - choose “Enable Kubernetes”,
-        - set CPUs to at least 3, and Memory to at least 6.0 GiB
-        - on the "Disk" tab, set at least 32 GB disk space
-
-    - To launch a **Kind** cluster:
-
-      ```shell
-      kind create cluster
-      ```
-
-2. Run `kubectl get nodes` to verify you're connected to the respective control plane.
-
-3. Run `skaffold run` (first time will be slow, it can take ~20 minutes).
-   This will build and deploy the application. If you need to rebuild the images
-   automatically as you refactor the code, run `skaffold dev` command.
-
-4. Run `kubectl get pods` to verify the Pods are ready and running.
-
-5. Run `kubectl port-forward deployment/frontend 8080:8080` to forward a port to the frontend service.
-
-6. Navigate to `localhost:8080` to access the web frontend.
+The manifests still use the images published by the upstream project. To clean up, run `kubectl delete -k kustomize/`.
 
 ## Adding a new microservice
 
-In general, the set of core microservices for Online Boutique is fairly complete and unlikely to change in the future, but it can be useful to add an additional optional microservice that can be deployed to complement the core services.
-
-See the [Adding a new microservice](adding-new-microservice.md) guide for instructions on how to add a new microservice.
-
-## Cleanup
-
-If you've deployed the application with `skaffold run` command, you can run
-`skaffold delete` to clean up the deployed resources.
+See the [Adding a new microservice](adding-new-microservice.md) guide.

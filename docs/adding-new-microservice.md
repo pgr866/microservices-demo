@@ -14,6 +14,7 @@ Place your microservice's source code inside the newly created directory. The st
 - `main.py`: The application's entry point.
 - `requirements.in`: A list of Python dependencies.
 - `Dockerfile`: To containerize the application.
+- `Dockerfile.dev`: The development image (last stage `dev`, with hot reload) and the stages for tests, linter and formatting.
 
 Take a look at existing microservices for inspiration.
 
@@ -30,9 +31,7 @@ Create a new directory under `kustomize/components/` in the root of the reposito
 - A **Deployment** to manage your service's pods.
 - A **Service** to expose your microservice to other services within the cluster.
 
-Ensure you follow the existing naming conventions and that the container image specified in the Deployment matches the one built by your `cloudbuild.yaml` and `skaffold.yaml` files.
-
-Refer to this example and tweak based on your new service's needs: https://github.com/GoogleCloudPlatform/microservices-demo/tree/main/kustomize/components/shopping-assistant
+Ensure you follow the existing naming conventions and that the container image specified in the Deployment matches the image name of your service.
 
 ## 5. Update the root `kustomization.yaml` file
 
@@ -40,11 +39,9 @@ Add your newly created component to the root kustomization file so it gets picke
 
 The file is available here: https://github.com/GoogleCloudPlatform/microservices-demo/blob/main/kustomize/kustomization.yaml
 
-## 6. Update the root `skaffold.yaml`
+## 6. Update `compose.yaml`
 
-Add your newly created service to the root skaffold file so the images build correctly.
-
-The file is available here: https://github.com/GoogleCloudPlatform/microservices-demo/blob/main/skaffold.yaml
+Add your service to the root [`compose.yaml`](/compose.yaml), built from its `Dockerfile.dev`, with a `healthcheck` and `depends_on` for the services it calls, so that `docker compose up` runs it locally.
 
 ## 7. Update the Helm chart
 

@@ -15,18 +15,18 @@
 package main
 
 import (
+	"cmp"
+	"context"
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
-	"cloud.google.com/go/profiler"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 
 	pb "github.com/GoogleCloudPlatform/microservices-demo/src/shippingservice/genproto"
@@ -41,7 +41,6 @@ var log *logrus.Logger
 
 func init() {
 	log = logrus.New()
-	log.Level = logrus.DebugLevel
 	log.Formatter = &logrus.JSONFormatter{
 		FieldMap: logrus.FieldMap{
 			logrus.FieldKeyTime:  "timestamp",
@@ -51,26 +50,42 @@ func init() {
 		TimestampFormat: time.RFC3339Nano,
 	}
 	log.Out = os.Stdout
+	log.AddHook(loggerName("shippingservice"))
+	level, err := parseLogLevel(os.Getenv("LOG_LEVEL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Level = level
+}
+
+// loggerName adds the "logger" field to every log line.
+type loggerName string
+
+func (loggerName) Levels() []logrus.Level { return logrus.AllLevels }
+
+func (n loggerName) Fire(entry *logrus.Entry) error {
+	entry.Data["logger"] = string(n)
+	return nil
+}
+
+// parseLogLevel accepts only the levels shared by every service (logrus.ParseLevel also takes trace, fatal, panic).
+func parseLogLevel(s string) (logrus.Level, error) {
+	switch strings.ToLower(cmp.Or(s, "info")) {
+	case "debug":
+		return logrus.DebugLevel, nil
+	case "info":
+		return logrus.InfoLevel, nil
+	case "warn":
+		return logrus.WarnLevel, nil
+	case "error":
+		return logrus.ErrorLevel, nil
+	}
+	return 0, fmt.Errorf("invalid LOG_LEVEL %q: want debug, info, warn or error", s)
 }
 
 func main() {
-	if os.Getenv("DISABLE_TRACING") == "" {
-		log.Info("Tracing enabled, but temporarily unavailable")
-		log.Info("See https://github.com/GoogleCloudPlatform/microservices-demo/issues/422 for more info.")
-		go initTracing()
-	} else {
-		log.Info("Tracing disabled.")
-	}
-
-	if os.Getenv("DISABLE_PROFILER") == "" {
-		log.Info("Profiling enabled.")
-		go initProfiling("shippingservice", "1.0.0")
-	} else {
-		log.Info("Profiling disabled.")
-	}
-
 	port := defaultPort
-	if value, ok := os.LookupEnv("PORT"); ok {
+	if value, ok := os.LookupEnv("PORT"); ok == true {
 		port = value
 	}
 	port = fmt.Sprintf(":%s", port)
@@ -80,54 +95,36 @@ func main() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	var srv *grpc.Server
-	if os.Getenv("DISABLE_STATS") == "" {
-		log.Info("Stats enabled, but temporarily unavailable")
-		srv = grpc.NewServer()
-	} else {
-		log.Info("Stats disabled.")
-		srv = grpc.NewServer()
-	}
+	srv := grpc.NewServer()
 	svc := &server{}
 	pb.RegisterShippingServiceServer(srv, svc)
 	healthcheck := health.NewServer()
 	healthpb.RegisterHealthServer(srv, healthcheck)
 	log.Infof("Shipping Service listening on port %s", port)
 
-	// Register reflection service on gRPC server.
-	reflection.Register(srv)
-	if err := srv.Serve(lis); err != nil {
+	if err := serveUntilSignal(srv, lis, healthcheck); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
 }
 
-// server controls RPC service responses.
 type server struct {
 	pb.UnimplementedShippingServiceServer
 }
 
-// Check is for health checking.
-func (s *server) Check(ctx context.Context, req *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
-	return &healthpb.HealthCheckResponse{Status: healthpb.HealthCheckResponse_SERVING}, nil
-}
-
-func (s *server) Watch(req *healthpb.HealthCheckRequest, ws healthpb.Health_WatchServer) error {
-	return status.Errorf(codes.Unimplemented, "health check via Watch not implemented")
-}
-
-// GetQuote produces a shipping quote (cost) in USD.
 func (s *server) GetQuote(ctx context.Context, in *pb.GetQuoteRequest) (*pb.GetQuoteResponse, error) {
-	log.Info("[GetQuote] received request")
-	defer log.Info("[GetQuote] completed request")
+	log.Debug("[GetQuote] received request")
+	defer log.Debug("[GetQuote] completed request")
 
-	// 1. Generate a quote based on the total number of items to be shipped.
 	count := 0
-	for _, item := range in.Items {
-		count += int(item.Quantity)
+	for _, item := range in.GetItems() {
+		// Otherwise a negative quantity could cancel the rest and make shipping free.
+		if item.GetQuantity() < 1 {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid quantity %d for product %q", item.GetQuantity(), item.GetProductId())
+		}
+		count += int(item.GetQuantity())
 	}
 	quote := CreateQuoteFromCount(count)
 
-	// 2. Generate a response.
 	return &pb.GetQuoteResponse{
 		CostUsd: &pb.Money{
 			CurrencyCode: "USD",
@@ -137,47 +134,18 @@ func (s *server) GetQuote(ctx context.Context, in *pb.GetQuoteRequest) (*pb.GetQ
 
 }
 
-// ShipOrder mocks that the requested items will be shipped.
-// It supplies a tracking ID for notional lookup of shipment delivery status.
+// ShipOrder ships nothing: it only returns a made-up tracking ID.
 func (s *server) ShipOrder(ctx context.Context, in *pb.ShipOrderRequest) (*pb.ShipOrderResponse, error) {
-	log.Info("[ShipOrder] received request")
-	defer log.Info("[ShipOrder] completed request")
-	// 1. Create a Tracking ID
-	baseAddress := fmt.Sprintf("%s, %s, %s", in.Address.StreetAddress, in.Address.City, in.Address.State)
+	log.Debug("[ShipOrder] received request")
+	defer log.Debug("[ShipOrder] completed request")
+	// A nil address would panic and take down the whole server, not just this call.
+	if in.GetAddress() == nil {
+		return nil, status.Error(codes.InvalidArgument, "address is required")
+	}
+	baseAddress := fmt.Sprintf("%s, %s, %s", in.GetAddress().GetStreetAddress(), in.GetAddress().GetCity(), in.GetAddress().GetState())
 	id := CreateTrackingId(baseAddress)
 
-	// 2. Generate a response.
 	return &pb.ShipOrderResponse{
 		TrackingId: id,
 	}, nil
-}
-
-func initStats() {
-	//TODO(arbrown) Implement OpenTelemetry stats
-}
-
-func initTracing() {
-	// TODO(arbrown) Implement OpenTelemetry tracing
-}
-
-func initProfiling(service, version string) {
-	// TODO(ahmetb) this method is duplicated in other microservices using Go
-	// since they are not sharing packages.
-	for i := 1; i <= 3; i++ {
-		if err := profiler.Start(profiler.Config{
-			Service:        service,
-			ServiceVersion: version,
-			// ProjectID must be set if not running on GCP.
-			// ProjectID: "my-project",
-		}); err != nil {
-			log.Warnf("failed to start profiler: %+v", err)
-		} else {
-			log.Info("started Stackdriver profiler")
-			return
-		}
-		d := time.Second * 10 * time.Duration(i)
-		log.Infof("sleeping %v to retry initializing Stackdriver profiler", d)
-		time.Sleep(d)
-	}
-	log.Warn("could not initialize Stackdriver profiler after retrying, giving up")
 }

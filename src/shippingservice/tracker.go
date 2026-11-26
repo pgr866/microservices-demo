@@ -19,7 +19,6 @@ import (
 	"math/rand"
 )
 
-// CreateTrackingId generates a tracking ID.
 func CreateTrackingId(salt string) string {
 	return fmt.Sprintf("%c%c-%d%s-%d%s",
 		getRandomLetterCode(),
@@ -31,15 +30,13 @@ func CreateTrackingId(salt string) string {
 	)
 }
 
-// getRandomLetterCode generates a code point value for a capital letter.
 func getRandomLetterCode() uint32 {
-	return 65 + uint32(rand.Intn(25))
+	return 65 + uint32(rand.Intn(26))
 }
 
-// getRandomNumber generates a string representation of a number with the requested number of digits.
 func getRandomNumber(digits int) string {
 	str := ""
-	for i := 0; i < digits; i++ {
+	for range digits {
 		str = fmt.Sprintf("%s%d", str, rand.Intn(10))
 	}
 
