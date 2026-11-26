@@ -233,10 +233,54 @@ services:
       paymentservice:
         condition: service_healthy
 
+  frontend:
+    container_name: frontend
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/frontend:/app
+      - frontend_cache:/cache
+    ports:
+      - "8082:8082"
+    environment:
+      PORT: "8082"
+      LOG_LEVEL: "debug"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+      CURRENCY_SERVICE_ADDR: "currencyservice:7000"
+      CART_SERVICE_ADDR: "cartservice:7070"
+      RECOMMENDATION_SERVICE_ADDR: "recommendationservice:8081"
+      SHIPPING_SERVICE_ADDR: "shippingservice:50051"
+      CHECKOUT_SERVICE_ADDR: "checkoutservice:5050"
+      AD_SERVICE_ADDR: "adservice:9555"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8082/_healthz"]
+    depends_on:
+      productcatalogservice:
+        condition: service_healthy
+      currencyservice:
+        condition: service_healthy
+      cartservice:
+        condition: service_healthy
+      recommendationservice:
+        condition: service_healthy
+      shippingservice:
+        condition: service_healthy
+      checkoutservice:
+        condition: service_healthy
+      adservice:
+        condition: service_healthy
+
 volumes:
   productcatalogservice_cache:
   shippingservice_cache:
   checkoutservice_cache:
+  frontend_cache:
   paymentservice_node_modules:
   currencyservice_node_modules:
   adservice_gradle_home:

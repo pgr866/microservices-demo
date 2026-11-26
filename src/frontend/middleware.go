@@ -17,10 +17,10 @@ package main
 import (
 	"context"
 	"net/http"
-	"time"
 	"os"
+	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
@@ -55,8 +55,13 @@ func (r *responseRecorder) WriteHeader(statusCode int) {
 }
 
 func (lh *logHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Probes come every few seconds: even at debug level they would bury the real requests.
+	if r.URL.Path == baseUrl+"/_healthz" {
+		lh.next.ServeHTTP(w, r)
+		return
+	}
 	ctx := r.Context()
-	requestID, _ := uuid.NewRandom()
+	requestID := uuid.New()
 	ctx = context.WithValue(ctx, ctxKeyRequestID{}, requestID.String())
 
 	start := time.Now()
@@ -66,9 +71,7 @@ func (lh *logHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"http.req.method": r.Method,
 		"http.req.id":     requestID.String(),
 	})
-	if v, ok := r.Context().Value(ctxKeySessionID{}).(string); ok {
-		log = log.WithField("session", v)
-	}
+	// No session ID: it is the key to the cart.
 	log.Debug("request started")
 	defer func() {
 		log.WithFields(logrus.Fields{
@@ -82,27 +85,67 @@ func (lh *logHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	lh.next.ServeHTTP(rr, r)
 }
 
+// maxBodyBytes: the largest form (checkout) is well under 1 KiB.
+const maxBodyBytes = 64 << 10
+
+// contentSecurityPolicy blocks injected scripts; "data:" images are the icons inlined in Bootstrap's CSS.
+const contentSecurityPolicy = "default-src 'self'; " +
+	"script-src 'self'; " +
+	"style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com; " +
+	"font-src https://fonts.gstatic.com; " +
+	"img-src 'self' data:; " +
+	"object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		// Not "no-referrer": setCurrency needs it to go back to the page the user was on.
+		h.Set("Referrer-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// limitBody stops a huge upload from being buffered whole while parsing a form.
+func limitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// withTimeout sets the deadline propagated to every gRPC call, so a stuck dependency yields 504.
+func withTimeout(next http.Handler, timeout time.Duration) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func ensureSessionID(next http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var sessionID string
-		c, err := r.Cookie(cookieSessionID)
-		if err == http.ErrNoCookie {
+		if c, err := r.Cookie(cookieSessionID); err == nil {
+			sessionID = c.Value
+		} else {
 			if os.Getenv("ENABLE_SINGLE_SHARED_SESSION") == "true" {
-				// Hard coded user id, shared across sessions
 				sessionID = "12345678-1234-1234-1234-123456789123"
 			} else {
-				u, _ := uuid.NewRandom()
-				sessionID = u.String()
+				sessionID = uuid.New().String()
 			}
+			// HttpOnly keeps it from injected scripts; SameSite=Lax from cross-site requests (CSRF).
+			// Path: by default the browser would scope it to the folder of the first page, e.g. /product.
 			http.SetCookie(w, &http.Cookie{
-				Name:   cookieSessionID,
-				Value:  sessionID,
-				MaxAge: cookieMaxAge,
+				Name:     cookieSessionID,
+				Value:    sessionID,
+				Path:     baseUrl + "/",
+				MaxAge:   cookieMaxAge,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
 			})
-		} else if err != nil {
-			return
-		} else {
-			sessionID = c.Value
 		}
 		ctx := context.WithValue(r.Context(), ctxKeySessionID{}, sessionID)
 		r = r.WithContext(ctx)
