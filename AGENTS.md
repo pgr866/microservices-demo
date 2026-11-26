@@ -75,8 +75,9 @@ Cada factor es un *component* de Kustomize; cada escenario, un overlay con su na
 ## 2. Estado actual y calendario
 
 - ✅ **Tareas 1-3:** fork limpio, los 10 microservicios puestos a punto en local y tests de punta a punta en `e2e/` (falta engancharlos al CI). Detalle en la sección 3. Código de servicios **congelado**: no se añade nada nuevo.
-- ⏳ **Tareas 4-14:** diseñadas, sin implementar.
-- **Ramas:** una por tarea, creada desde `main` y fusionada por PR con *merge commit* (sin squash, para conservar sus commits); `main` no recibe commits directos.
+- 🔄 **Tarea 4:** en curso. Hecho: clúster `kind` con Cilium (`kind/`).
+- ⏳ **Tareas 5-14:** diseñadas, sin implementar.
+- **Ramas:** una por bloque de trabajo (una tarea corta, o un tema de una larga como la 4: clúster, workloads, recursos…), para que cada PR sea pequeña y `main` avance cada pocos días. Se crea desde `main` y se fusiona por PR con *merge commit* (sin squash, para conservar sus commits); `main` no recibe commits directos.
 - **Orden:** todo lo que no cuesta dinero primero (`kind`, CI, `terraform plan`). El primer `terraform apply` va en la semana 7; antes solo se crean, con `az`, el almacenamiento del estado y la identidad OIDC (Tarea 5).
 
 | Sem. | Kubernetes y experimento | CI / CD / Terraform en paralelo |
@@ -222,11 +223,11 @@ Gotchas:
 
 ---
 
-## Tarea 4 — Kubernetes en `kind` ⏳
+## Tarea 4 — Kubernetes en `kind` 🔄
 
 Aquí se hace el grueso del aprendizaje de Kubernetes (semanas 1-6), con YAML a mano antes de Kustomize.
 
-- Clúster `kind` **multinodo** (1 control plane + 3 workers) con **Cilium** como CNI, el mismo dataplane que AKS (Tarea 7), para que las NetworkPolicies y sus métricas se comporten igual en local y en la nube. Comprobar que la máquina aguanta 4 nodos más Prometheus.
+- Clúster `kind` **multinodo** (1 control plane + 3 workers) con **Cilium** como CNI, el mismo dataplane que AKS (Tarea 7), para que las NetworkPolicies y sus métricas se comporten igual en local y en la nube. Comprobar que la máquina aguanta 4 nodos más Prometheus. **Hecho en `kind/`** (`up.sh`). **Versiones de AKS, no las últimas** (ADR 0001): Kubernetes 1.36 (GA en AKS hasta junio de 2027) y Cilium 1.19, el que AKS usa en 1.36. Sin kube-proxy, enrutado nativo, Hubble y L7 desactivados (en AKS vienen con ACNS) y los ajustes que pide Istio ya puestos.
 - Las imágenes de `kustomize/base` siguen siendo las de Google: construir las propias y cargarlas con `kind load docker-image`.
 - Cada bloque de temas termina con su nota en `docs/notas/` y su fallo provocado: workloads y ciclo de vida; recursos y QoS (throttling, OOM); scheduling (taints, affinity, PDB, `drain`); red (Services, CoreDNS, NetworkPolicy, Cilium); seguridad (RBAC, PSA, Kyverno).
 - Validar los 4 overlays: los 10 servicios y `redis-cart` sanos; las NetworkPolicies bloquean lo no autorizado (acceso a Redis desde un pod sin permiso) y dejan pasar lo legítimo; un pod que excede `LimitRange`/`ResourceQuota` es rechazado.
@@ -273,7 +274,7 @@ Se dispara en cada PR, con dos tracks en paralelo. **Todo se ejecuta en Docker, 
 ## Tarea 7 — Infraestructura Azure (Terraform) ⏳
 
 - VNet propia con una subred para los nodos (Azure CNI Powered by Cilium en modo *overlay*). En Azure no hay subredes «públicas» como en AWS: lo público es la IP del balanceador por el que entra el tráfico.
-- **Un único clúster AKS para los 4 escenarios**, separados por namespace (NetworkPolicy, ResourceQuota y LimitRange son recursos de namespace). Dataplane **Azure CNI Powered by Cilium**. API server **público** con Entra ID/RBAC (los runners de GitHub deben poder llegar; no clúster privado).
+- **Un único clúster AKS para los 4 escenarios**, separados por namespace (NetworkPolicy, ResourceQuota y LimitRange son recursos de namespace). Dataplane **Azure CNI Powered by Cilium**. **Kubernetes 1.36**, la misma versión que `kind` (Tarea 4; ADR 0001), con el parche fijado y sin actualizaciones automáticas, para que las dos sesiones de campaña usen la misma versión. API server **público** con Entra ID/RBAC (los runners de GitHub deben poder llegar; no clúster privado).
 - **3 node pools** `sistema`, `carga` y `app`, con taints, en VMs **de la serie D, no B** (los créditos de CPU de las burstable distorsionan los benchmarks). Cluster Autoscaler configurable por variable: activo en desarrollo, apagado en la campaña.
 - ACR, con autenticación desde GitHub Actions por OIDC, sin credenciales estáticas.
 - Estado de Terraform en Azure Blob Storage con bloqueo (bootstrap en la Tarea 5).

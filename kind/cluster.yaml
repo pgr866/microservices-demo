@@ -1,0 +1,20 @@
+# Local cluster: 1 control plane and 3 workers, each a Docker container.
+# Same Kubernetes minor as the AKS cluster (see README.md).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: boutique
+networking:
+  # No CNI and no kube-proxy: Cilium does both, as in AKS.
+  disableDefaultCNI: true
+  kubeProxyMode: none
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/16
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+  - role: worker
+    image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+  - role: worker
+    image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+  - role: worker
+    image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed

@@ -24,4 +24,12 @@
       'kustomize/base/**',
     ],
   },
+  packageRules: [
+    {
+      // The kind node image goes with the kind release and follows the
+      // Kubernetes version of AKS (kind/README.md): it changes by hand.
+      matchPackageNames: ['kindest/node'],
+      enabled: false,
+    },
+  ],
 }
