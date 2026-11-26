@@ -19,33 +19,53 @@ using Microsoft.Extensions.Logging;
 using cartservice.cartstore;
 using Hipstershop;
 
-namespace cartservice.services
+namespace cartservice.services;
+
+public class CartService : Hipstershop.CartService.CartServiceBase
 {
-    public class CartService : Hipstershop.CartService.CartServiceBase
+    private readonly static Empty Empty = new();
+    private readonly ICartStore _cartStore;
+
+    public CartService(ICartStore cartStore)
     {
-        private readonly static Empty Empty = new Empty();
-        private readonly ICartStore _cartStore;
+        _cartStore = cartStore;
+    }
 
-        public CartService(ICartStore cartStore)
+    public async override Task<Empty> AddItem(AddItemRequest request, ServerCallContext context)
+    {
+        RequireUserId(request.UserId);
+        // Once stored, it would fail every checkout of the cart: no product has such an ID.
+        if (string.IsNullOrWhiteSpace(request.Item?.ProductId))
         {
-            _cartStore = cartStore;
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Item product ID is required"));
         }
-
-        public async override Task<Empty> AddItem(AddItemRequest request, ServerCallContext context)
+        if (request.Item.Quantity < 1)
         {
-            await _cartStore.AddItemAsync(request.UserId, request.Item.ProductId, request.Item.Quantity);
-            return Empty;
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Item quantity must be at least 1"));
         }
+        await _cartStore.AddItemAsync(request.UserId, request.Item.ProductId, request.Item.Quantity);
+        return Empty;
+    }
 
-        public override Task<Cart> GetCart(GetCartRequest request, ServerCallContext context)
-        {
-            return _cartStore.GetCartAsync(request.UserId);
-        }
+    public override Task<Cart> GetCart(GetCartRequest request, ServerCallContext context)
+    {
+        RequireUserId(request.UserId);
+        return _cartStore.GetCartAsync(request.UserId);
+    }
 
-        public async override Task<Empty> EmptyCart(EmptyCartRequest request, ServerCallContext context)
+    public async override Task<Empty> EmptyCart(EmptyCartRequest request, ServerCallContext context)
+    {
+        RequireUserId(request.UserId)     ;
+        await _cartStore.EmptyCartAsync(request.UserId);
+        return Empty;
+    }
+
+    // The user ID is the storage key: without it, every such call would share one cart.
+    private static void RequireUserId(string userId)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
         {
-            await _cartStore.EmptyCartAsync(request.UserId);
-            return Empty;
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "User ID is required"));
         }
     }
 }

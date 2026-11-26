@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/cartservice.csproj" />
+  <Project Path="tests/cartservice.tests.csproj" />
+</Solution>

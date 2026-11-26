@@ -128,6 +128,51 @@ services:
       # The first start downloads Gradle and the libraries.
       start_period: 300s
 
+  redis-cart:
+    container_name: redis-cart
+    image: redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /data:uid=1000,gid=1000
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "redis-cli -h 127.0.0.1 ping | grep -q PONG"]
+
+  cartservice:
+    container_name: cartservice
+    build:
+      context: ./src/cartservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/cartservice:/app
+      - cartservice_nuget_packages:/home/dev/.nuget/packages
+      - cartservice_obj:/app/src/obj
+      - cartservice_bin:/app/src/bin
+    ports:
+      - "7070:7070"
+    environment:
+      ASPNETCORE_HTTP_PORTS: "7070"
+      LOG_LEVEL: "debug"
+      REDIS_ADDR: "redis-cart:6379"
+    healthcheck:
+      <<: *healthcheck
+      # The port comes from ASPNETCORE_HTTP_PORTS, not PORT.
+      test: ["CMD-SHELL", "grpcurl -plaintext -import-path /protos -proto grpc/health/v1/health.proto 127.0.0.1:7070 grpc.health.v1.Health/Check | grep -q '\"SERVING\"'"]
+      # The first start restores the NuGet packages.
+      start_period: 300s
+    depends_on:
+      redis-cart:
+        condition: service_healthy
+
   recommendationservice:
     container_name: recommendationservice
     build:
@@ -158,3 +203,6 @@ volumes:
   adservice_gradle_home:
   adservice_gradle_project:
   adservice_build:
+  cartservice_nuget_packages:
+  cartservice_obj:
+  cartservice_bin:
