@@ -77,6 +77,7 @@ Note: the manifests still use the images published by the upstream project; imag
 ## Documentation
 
 - [Development](/docs/development-guide.md) to learn how to run and develop this app locally.
+- [Architecture decision records](/docs/adr/README.md) for the decisions behind the platform and the experiment.
 
 ## Demos featuring Online Boutique
 

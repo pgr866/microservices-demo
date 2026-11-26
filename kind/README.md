@@ -11,7 +11,7 @@ Kubernetes and Cilium follow AKS, not the latest upstream release:
 | Kubernetes | 1.36.4 (`kindest/node`, by digest) | GA in AKS until June 2027, past the end of the experiment; the AKS cluster uses the same minor. Istio 1.32 supports it. |
 | Cilium | 1.19.11 (Helm chart) | The minor that AKS runs on Kubernetes 1.36. Upstream tests 1.19 up to Kubernetes 1.35; Microsoft supports it on 1.36. |
 
-They change by hand, together, and only when the AKS cluster changes. Renovate leaves the node image alone: each one is built for a kind release.
+They change by hand, together, and only when the AKS cluster changes ([ADR 0001](../docs/adr/0001-kubernetes-and-cilium-versions.md)). Renovate leaves the node image alone: each one is built for a kind release.
 
 Tools, installed in the `PATH`:
 
