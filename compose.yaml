@@ -1,4 +1,4 @@
-# Local development only, with hot reload.
+# Local development only, with hot reload. The end-to-end tests use e2e/compose.yaml.
 
 # grpcurl also exits 0 on NOT_SERVING (shutting down), hence the grep.
 x-healthcheck: &healthcheck

@@ -1,0 +1,84 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: e2e
+spec:
+  # A failed test is a result, not something to retry.
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: e2e
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 12345
+        runAsGroup: 12345
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: k6
+          image: grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
+          command: ["sh", "-c", "k6 run smoke.js && k6 run cart-concurrent.js"]
+          workingDir: /e2e
+          env:
+            - name: BASE_URL
+              value: http://frontend
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: scripts
+              mountPath: /e2e
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: e2e-scripts
+            # ConfigMap keys have no folders, and the scripts import shop.js from lib/.
+            items:
+              - key: smoke.js
+                path: smoke.js
+              - key: cart-concurrent.js
+                path: cart-concurrent.js
+              - key: shop.js
+                path: lib/shop.js
+---
+# For the hardened scenario's deny-all; harmless without it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: e2e
+spec:
+  podSelector:
+    matchLabels:
+      app: e2e
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: frontend
+      ports:
+        - port: 8082
+          protocol: TCP
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP

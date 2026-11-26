@@ -1,0 +1,128 @@
+# End-to-end tests: the production images, hardened as in Kubernetes. See README.md.
+name: online-boutique-e2e
+
+x-hardened: &hardened
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  restart: "no"
+
+services:
+  productcatalogservice:
+    <<: *hardened
+    build: ../src/productcatalogservice
+    environment:
+      PORT: "3550"
+
+  shippingservice:
+    <<: *hardened
+    build: ../src/shippingservice
+    environment:
+      PORT: "50051"
+
+  paymentservice:
+    <<: *hardened
+    build: ../src/paymentservice
+    environment:
+      PORT: "50052"
+
+  currencyservice:
+    <<: *hardened
+    build: ../src/currencyservice
+    environment:
+      PORT: "7000"
+
+  emailservice:
+    <<: *hardened
+    build: ../src/emailservice
+    environment:
+      PORT: "8080"
+
+  adservice:
+    <<: *hardened
+    build: ../src/adservice
+    environment:
+      PORT: "9555"
+
+  redis-cart:
+    <<: *hardened
+    image: redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    user: "1000:1000"
+    tmpfs:
+      - /data:uid=1000,gid=1000
+
+  cartservice:
+    <<: *hardened
+    build: ../src/cartservice
+    environment:
+      ASPNETCORE_HTTP_PORTS: "7070"
+      REDIS_ADDR: "redis-cart:6379"
+
+  recommendationservice:
+    <<: *hardened
+    build: ../src/recommendationservice
+    environment:
+      PORT: "8081"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+
+  checkoutservice:
+    <<: *hardened
+    build: ../src/checkoutservice
+    environment:
+      PORT: "5050"
+      SHIPPING_SERVICE_ADDR: "shippingservice:50051"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+      CART_SERVICE_ADDR: "cartservice:7070"
+      CURRENCY_SERVICE_ADDR: "currencyservice:7000"
+      EMAIL_SERVICE_ADDR: "emailservice:8080"
+      PAYMENT_SERVICE_ADDR: "paymentservice:50052"
+
+  frontend:
+    <<: *hardened
+    build: ../src/frontend
+    environment:
+      PORT: "8082"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+      CURRENCY_SERVICE_ADDR: "currencyservice:7000"
+      CART_SERVICE_ADDR: "cartservice:7070"
+      RECOMMENDATION_SERVICE_ADDR: "recommendationservice:8081"
+      SHIPPING_SERVICE_ADDR: "shippingservice:50051"
+      CHECKOUT_SERVICE_ADDR: "checkoutservice:5050"
+      AD_SERVICE_ADDR: "adservice:9555"
+
+  # A one-off container: the distroless images have no shell for a healthcheck.
+  # redis-cart is waited for on its own: cartservice answers SERVING without it.
+  ready:
+    image: fullstorydev/grpcurl:v1.9.3-alpine@sha256:4614424ed58e9b9837c48b6b8eadb9ef40491d5af3499bcc8b378e9c64a9e4a9
+    profiles: ["test"]
+    read_only: true
+    volumes:
+      - ../protos:/protos:ro
+    init: true # so that `timeout` can stop sh, which as PID 1 would ignore it
+    entrypoint: ["timeout", "120", "sh", "-c"]
+    command:
+      - |
+        until nc -z redis-cart 6379; do sleep 1; done
+        for addr in productcatalogservice:3550 shippingservice:50051 paymentservice:50052 \
+            currencyservice:7000 emailservice:8080 adservice:9555 cartservice:7070 \
+            recommendationservice:8081 checkoutservice:5050; do
+          until grpcurl -plaintext -import-path /protos -proto grpc/health/v1/health.proto \
+              "$$addr" grpc.health.v1.Health/Check | grep -q '"SERVING"'; do sleep 1; done
+        done
+        until wget -q --spider http://frontend:8082/_healthz; do sleep 1; done
+
+  # Run with: docker compose run --rm k6 run <script>
+  k6:
+    image: grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
+    profiles: ["test"]
+    read_only: true
+    volumes:
+      - ./:/e2e:ro
+    working_dir: /e2e
+    environment:
+      BASE_URL: "http://frontend:8082"
+    depends_on:
+      ready:
+        condition: service_completed_successfully
