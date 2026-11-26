@@ -21,7 +21,7 @@ resources:
  - currencyservice.yaml
  - emailservice.yaml
  - frontend.yaml
-# - loadgenerator.yaml # During development, the loadgenerator module inside skaffold.yaml will be used.
+# - loadgenerator.yaml # Not deployed: the load test is k6.
  - paymentservice.yaml
  - productcatalogservice.yaml
  - recommendationservice.yaml
@@ -32,7 +32,6 @@ resources:
 # - ../kustomize/components/memorystore
 # - ../kustomize/components/network-policies
 # - ../kustomize/components/alloydb
-# - ../kustomize/components/shopping-assistant
 # - ../kustomize/components/spanner
 # - ../kustomize/components/container-images-tag
 # - ../kustomize/components/container-images-tag-suffix

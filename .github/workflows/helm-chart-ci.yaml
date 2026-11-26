@@ -44,7 +44,6 @@ jobs:
         run: |
           # Test related to https://medium.com/google-cloud/b5bd26253a4c
           cd helm-chart/
-          SPANNER_CONNECTION_STRING=projects/PROJECT_ID/instances/SPANNER_INSTANCE_NAME/databases/SPANNER_DATABASE_NAME
           helm template . \
             --set nativeGrpcHealthCheck=true \
             -n onlineboutique \

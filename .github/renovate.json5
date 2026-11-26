@@ -20,7 +20,7 @@
       '/\\.yaml$/',
     ],
     ignorePaths: [
-      'release/**',
+      // Upstream manifests that still use Google's images.
       'kustomize/base/**',
     ],
   },
