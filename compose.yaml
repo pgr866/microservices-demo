@@ -104,6 +104,28 @@ services:
       LOG_LEVEL: "debug"
     healthcheck: *healthcheck
 
+  recommendationservice:
+    container_name: recommendationservice
+    build:
+      context: ./src/recommendationservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/recommendationservice:/app
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      LOG_LEVEL: "debug"
+      PRODUCT_CATALOG_SERVICE_ADDR: "productcatalogservice:3550"
+    healthcheck: *healthcheck
+    depends_on:
+      productcatalogservice:
+        condition: service_healthy
+
 volumes:
   productcatalogservice_cache:
   shippingservice_cache:

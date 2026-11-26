@@ -99,7 +99,7 @@ spec:
           - name: CART_SERVICE_ADDR
             value: "{{ .Values.cartService.name }}:7070"
           - name: RECOMMENDATION_SERVICE_ADDR
-            value: "{{ .Values.recommendationService.name }}:8080"
+            value: "{{ .Values.recommendationService.name }}:8081"
           - name: SHIPPING_SERVICE_ADDR
             value: "{{ .Values.shippingService.name }}:50051"
           - name: CHECKOUT_SERVICE_ADDR

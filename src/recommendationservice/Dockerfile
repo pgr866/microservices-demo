@@ -12,44 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Define a default value so it's not empty if the builder fails to provide it
-ARG BUILDPLATFORM=linux/amd64
-
-FROM --platform=$BUILDPLATFORM python:3.14.7-alpine@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc AS base
+FROM python:3.15.2-alpine3.24@sha256:0f9552bb28711333da16915ec146f5e6bb44a7fdac9ced15dc17c2e0206346dd AS base
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+WORKDIR /app
 
 FROM base AS builder
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-RUN apk update \
-    && apk add --no-cache g++ linux-headers \
-    && rm -rf /var/cache/apk/*
-
-# get packages
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip,id=pip \
+    pip install --root-user-action=ignore --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.txt \
+    && pip uninstall -y --root-user-action=ignore pip \
+    && python -m compileall -q -f -j 0 --invalidation-mode unchecked-hash /usr/local/lib/python3.15/site-packages
 
 FROM base
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-RUN apk update \
-    && apk add --no-cache libstdc++ \
-    && rm -rf /var/cache/apk/*
-
-# get packages
-WORKDIR /recommendationservice
-
-# Grab packages from builder
-COPY --from=builder /usr/local/lib/python3.14/ /usr/local/lib/python3.14/
-
-# Add the application
+# apk upgrade: the security fixes published since the base image was built.
+RUN apk upgrade --no-cache \
+    && apk del --no-cache apk-tools \
+    && pip uninstall -y --root-user-action=ignore pip \
+    && addgroup -g 1000 recommendationservice \
+    && adduser -D -u 1000 -G recommendationservice recommendationservice
+COPY --from=builder /usr/local/lib/python3.15/site-packages/ /usr/local/lib/python3.15/site-packages/
 COPY . .
-
-# set listen port
-ENV PORT="8080"
-EXPOSE 8080
-
+RUN python -m compileall -q -f --invalidation-mode unchecked-hash .
+USER 1000:1000
+EXPOSE 8081
+# The Kubernetes probes check health.
+HEALTHCHECK NONE
 ENTRYPOINT ["python", "recommendation_server.py"]

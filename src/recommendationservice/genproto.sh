@@ -1,4 +1,4 @@
-#!/bin/bash -eu
+#!/bin/sh
 #
 # Copyright 2018 Google LLC
 #
@@ -14,13 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# [START gke_recommendationservice_genproto]
+set -eu
 
-# script to compile python protos
-#
-# requires gRPC tools:
-#   pip install -r requirements.txt
-
+# protoc drops the license header of the generated files: put back whatever preceded the old first line.
+cp demo_pb2.py demo_pb2_grpc.py /tmp/
 python -m grpc_tools.protoc -I../../protos --python_out=. --grpc_python_out=. ../../protos/demo.proto
-
-# [END gke_recommendationservice_genproto]
+for f in demo_pb2.py demo_pb2_grpc.py; do
+  n=$(grep -n -m1 -x -F "$(head -n 1 $f)" /tmp/$f | cut -d: -f1)
+  { head -n $(( ${n:-1} - 1 )) /tmp/$f; cat $f; } > /tmp/new && cat /tmp/new > $f
+done
