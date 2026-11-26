@@ -12,95 +12,119 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-const path = require('path');
+const path = require('node:path');
 const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
-
 const charge = require('./charge');
+const logger = require('./logger')('paymentservice-server');
 
-const logger = require('./logger')
+// Below the 30 s Kubernetes waits before sending SIGKILL.
+const SHUTDOWN_TIMEOUT_MS = 10000;
 
-class HipsterShopServer {
-  constructor(protoRoot, port = HipsterShopServer.PORT) {
-    this.port = port;
+function loadProto(file) {
+  const packageDefinition = protoLoader.loadSync(
+    path.join(__dirname, 'proto', file),
+    {
+      keepCase: true,
+      longs: String,
+      enums: String,
+      defaults: true,
+      oneofs: true,
+    },
+  );
+  return grpc.loadPackageDefinition(packageDefinition);
+}
 
-    this.packages = {
-      hipsterShop: this.loadProto(path.join(protoRoot, 'demo.proto')),
-      health: this.loadProto(path.join(protoRoot, 'grpc/health/v1/health.proto'))
-    };
+const shopProto = loadProto('demo.proto').hipstershop;
+const healthProto = loadProto('grpc/health/v1/health.proto').grpc.health.v1;
 
-    this.server = new grpc.Server();
-    this.loadAllProtos(protoRoot);
-  }
-
-  /**
-   * Handler for PaymentService.Charge.
-   * @param {*} call  { ChargeRequest }
-   * @param {*} callback  fn(err, ChargeResponse)
-   */
-  static ChargeServiceHandler(call, callback) {
-    try {
-      logger.info(`PaymentService#Charge invoked with request ${JSON.stringify(call.request)}`);
-      const response = charge(call.request);
-      callback(null, response);
-    } catch (err) {
-      console.warn(err);
-      callback(err);
+function chargeHandler(call, callback) {
+  // Never the request: it carries the card number and CVV (PCI DSS).
+  logger.debug('PaymentService#Charge invoked');
+  try {
+    callback(null, charge(call.request));
+  } catch (err) {
+    // Without a code it is a bug: its detail stays in the logs.
+    if (err.code === undefined) {
+      logger.error(`PaymentService#Charge failed: ${err.stack}`);
+      callback({ code: grpc.status.INTERNAL, message: 'internal error' });
+      return;
     }
-  }
-
-  static CheckHandler(call, callback) {
-    callback(null, { status: 'SERVING' });
-  }
-
-
-  listen() {
-    const server = this.server 
-    const port = this.port
-    server.bindAsync(
-      `[::]:${port}`,
-      grpc.ServerCredentials.createInsecure(),
-      function () {
-        logger.info(`PaymentService gRPC server started on port ${port}`);
-        server.start();
-      }
-    );
-  }
-
-  loadProto(path) {
-    const packageDefinition = protoLoader.loadSync(
-      path,
-      {
-        keepCase: true,
-        longs: String,
-        enums: String,
-        defaults: true,
-        oneofs: true
-      }
-    );
-    return grpc.loadPackageDefinition(packageDefinition);
-  }
-
-  loadAllProtos(protoRoot) {
-    const hipsterShopPackage = this.packages.hipsterShop.hipstershop;
-    const healthPackage = this.packages.health.grpc.health.v1;
-
-    this.server.addService(
-      hipsterShopPackage.PaymentService.service,
-      {
-        charge: HipsterShopServer.ChargeServiceHandler.bind(this)
-      }
-    );
-
-    this.server.addService(
-      healthPackage.Health.service,
-      {
-        check: HipsterShopServer.CheckHandler.bind(this)
-      }
-    );
+    logger.warn(`PaymentService#Charge failed: ${err.message}`);
+    callback({ code: err.code, message: err.message });
   }
 }
 
-HipsterShopServer.PORT = process.env.PORT;
+// Set on SIGTERM so the health check stops traffic while in-flight calls finish.
+let shuttingDown = false;
 
-module.exports = HipsterShopServer;
+function check(call, callback) {
+  callback(null, { status: shuttingDown ? 'NOT_SERVING' : 'SERVING' });
+}
+
+function createServer() {
+  const server = new grpc.Server();
+  server.addService(shopProto.PaymentService.service, {
+    charge: chargeHandler,
+  });
+  server.addService(healthProto.Health.service, { check });
+  return server;
+}
+
+function gracefulShutdown(server, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      logger.warn(`calls still in flight after ${timeoutMs} ms, cutting them`);
+      server.forceShutdown();
+      resolve();
+    }, timeoutMs);
+    server.tryShutdown(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+// Needed: as PID 1 in the container, Node would otherwise ignore SIGTERM.
+function stopOnSignals(server) {
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    process.once(signal, async () => {
+      logger.info(`received ${signal}, shutting down`);
+      shuttingDown = true;
+      await gracefulShutdown(server);
+      process.exit(0);
+    });
+  }
+}
+
+// Exits if the port cannot be bound, instead of staying up without serving.
+function start(port) {
+  const server = createServer();
+  server.bindAsync(
+    `[::]:${port}`,
+    grpc.ServerCredentials.createInsecure(),
+    (err) => {
+      if (err) {
+        logger.fatal(`cannot listen on port ${port}: ${err.message}`);
+        process.exit(1);
+      }
+      logger.info(`PaymentService gRPC server started on port ${port}`);
+    },
+  );
+  stopOnSignals(server);
+  return server;
+}
+
+module.exports = {
+  chargeHandler,
+  check,
+  createServer,
+  gracefulShutdown,
+  logger,
+  start,
+  stopOnSignals,
+};
+
+if (require.main === module) {
+  start(process.env.PORT || '50052');
+}

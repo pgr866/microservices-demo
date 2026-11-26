@@ -48,6 +48,25 @@ services:
       LOG_LEVEL: "debug"
     healthcheck: *healthcheck
 
+  paymentservice:
+    container_name: paymentservice
+    build:
+      context: ./src/paymentservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/paymentservice:/app
+      - paymentservice_node_modules:/app/node_modules
+    ports:
+      - "50052:50052"
+    environment:
+      PORT: "50052"
+      LOG_LEVEL: "debug"
+    healthcheck: *healthcheck
+
   currencyservice:
     container_name: currencyservice
     build:
@@ -70,4 +89,5 @@ services:
 volumes:
   productcatalogservice_cache:
   shippingservice_cache:
+  paymentservice_node_modules:
   currencyservice_node_modules:
