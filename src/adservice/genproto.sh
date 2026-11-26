@@ -1,4 +1,4 @@
-#!/bin/bash -eu
+#!/bin/sh
 #
 # Copyright 2018 Google LLC
 #
@@ -14,10 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# [START gke_adservice_genproto]
-# protos are needed in adservice folder for compiling during Docker build.
+set -eu
 
-mkdir -p proto && \
 cp ../../protos/demo.proto src/main/proto
-
-# [END gke_adservice_genproto]

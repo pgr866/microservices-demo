@@ -104,6 +104,30 @@ services:
       LOG_LEVEL: "debug"
     healthcheck: *healthcheck
 
+  adservice:
+    container_name: adservice
+    build:
+      context: ./src/adservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/adservice:/app
+      - adservice_gradle_home:/home/dev/.gradle
+      - adservice_gradle_project:/app/.gradle
+      - adservice_build:/app/build
+    ports:
+      - "9555:9555"
+    environment:
+      PORT: "9555"
+      LOG_LEVEL: "debug"
+    healthcheck:
+      <<: *healthcheck
+      # The first start downloads Gradle and the libraries.
+      start_period: 300s
+
   recommendationservice:
     container_name: recommendationservice
     build:
@@ -131,3 +155,6 @@ volumes:
   shippingservice_cache:
   paymentservice_node_modules:
   currencyservice_node_modules:
+  adservice_gradle_home:
+  adservice_gradle_project:
+  adservice_build:
