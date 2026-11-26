@@ -1,0 +1,33 @@
+# Local development only, with hot reload.
+
+# grpcurl also exits 0 on NOT_SERVING (shutting down), hence the grep.
+x-healthcheck: &healthcheck
+  test: ["CMD-SHELL", "grpcurl -plaintext -import-path /protos -proto grpc/health/v1/health.proto 127.0.0.1:$${PORT} grpc.health.v1.Health/Check | grep -q '\"SERVING\"'"]
+  start_period: 120s
+  start_interval: 1s
+  interval: 10s
+  timeout: 3s
+  retries: 3
+
+services:
+  productcatalogservice:
+    container_name: productcatalogservice
+    build:
+      context: ./src/productcatalogservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/productcatalogservice:/app
+      - productcatalogservice_cache:/cache
+    ports:
+      - "3550:3550"
+    environment:
+      PORT: "3550"
+      LOG_LEVEL: "debug"
+    healthcheck: *healthcheck
+
+volumes:
+  productcatalogservice_cache:

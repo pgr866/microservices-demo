@@ -17,25 +17,20 @@ package main
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	pb "github.com/GoogleCloudPlatform/microservices-demo/src/productcatalogservice/genproto"
 	"google.golang.org/grpc/codes"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 )
 
 type productCatalog struct {
 	pb.UnimplementedProductCatalogServiceServer
+
+	// mu guards catalog against concurrent reloads.
+	mu      sync.RWMutex
 	catalog pb.ListProductsResponse
-}
-
-func (p *productCatalog) Check(ctx context.Context, req *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
-	return &healthpb.HealthCheckResponse{Status: healthpb.HealthCheckResponse_SERVING}, nil
-}
-
-func (p *productCatalog) Watch(req *healthpb.HealthCheckRequest, ws healthpb.Health_WatchServer) error {
-	return status.Errorf(codes.Unimplemented, "health check via Watch not implemented")
 }
 
 func (p *productCatalog) ListProducts(context.Context, *pb.Empty) (*pb.ListProductsResponse, error) {
@@ -47,23 +42,23 @@ func (p *productCatalog) ListProducts(context.Context, *pb.Empty) (*pb.ListProdu
 func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductRequest) (*pb.Product, error) {
 	time.Sleep(extraLatency)
 
-	catalog := p.parseCatalog()
-	for _, product := range catalog {
-		if req.Id == product.Id {
+	for _, product := range p.parseCatalog() {
+		if product.GetId() == req.GetId() {
 			return product, nil
 		}
 	}
 
-	return nil, status.Errorf(codes.NotFound, "no product with ID %s", req.Id)
+	return nil, status.Errorf(codes.NotFound, "no product with ID %q", req.GetId())
 }
 
 func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProductsRequest) (*pb.SearchProductsResponse, error) {
 	time.Sleep(extraLatency)
 
+	query := strings.ToLower(req.GetQuery())
 	var ps []*pb.Product
 	for _, product := range p.parseCatalog() {
-		if strings.Contains(strings.ToLower(product.Name), strings.ToLower(req.Query)) ||
-			strings.Contains(strings.ToLower(product.Description), strings.ToLower(req.Query)) {
+		if strings.Contains(strings.ToLower(product.GetName()), query) ||
+			strings.Contains(strings.ToLower(product.GetDescription()), query) {
 			ps = append(ps, product)
 		}
 	}
@@ -71,13 +66,23 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 	return &pb.SearchProductsResponse{Results: ps}, nil
 }
 
+// parseCatalog reloads products.json if empty or reloading is on; a failed reload keeps the old catalog.
 func (p *productCatalog) parseCatalog() []*pb.Product {
-	if reloadCatalog || len(p.catalog.Products) == 0 {
-		err := loadCatalog(&p.catalog)
-		if err != nil {
-			return []*pb.Product{}
+	p.mu.RLock()
+	empty := len(p.catalog.Products) == 0
+	p.mu.RUnlock()
+
+	if reloadCatalog.Load() || empty {
+		// Parsed outside the lock so requests don't block on the file.
+		var fresh pb.ListProductsResponse
+		if err := loadCatalog(&fresh); err == nil {
+			p.mu.Lock()
+			p.catalog.Products = fresh.Products
+			p.mu.Unlock()
 		}
 	}
 
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.catalog.Products
 }
