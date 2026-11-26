@@ -48,6 +48,26 @@ services:
       LOG_LEVEL: "debug"
     healthcheck: *healthcheck
 
+  currencyservice:
+    container_name: currencyservice
+    build:
+      context: ./src/currencyservice
+      dockerfile: Dockerfile.dev
+      target: dev
+    group_add:
+      - "${DOCKER_GID:-989}"
+    volumes:
+      - ./protos:/protos:ro
+      - ./src/currencyservice:/app
+      - currencyservice_node_modules:/app/node_modules
+    ports:
+      - "7000:7000"
+    environment:
+      PORT: "7000"
+      LOG_LEVEL: "debug"
+    healthcheck: *healthcheck
+
 volumes:
   productcatalogservice_cache:
   shippingservice_cache:
+  currencyservice_node_modules:
