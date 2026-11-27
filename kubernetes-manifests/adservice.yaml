@@ -43,7 +43,9 @@ spec:
               - ALL
           privileged: false
           readOnlyRootFilesystem: true
-        image: adservice
+        # Built and loaded into the nodes by kind/load-images.sh: never pulled.
+        image: boutique/adservice:local
+        imagePullPolicy: Never
         ports:
         - containerPort: 9555
         env:

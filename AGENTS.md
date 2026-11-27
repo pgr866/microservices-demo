@@ -174,7 +174,7 @@ Los umbrales por debajo del 70 % son de servicios donde casi todo lo no cubierto
 
 ### Decisiones de comportamiento que afectan al experimento
 
-- **Puertos** (iguales en desarrollo y producción): `frontend` 8082, `paymentservice` 50052, `recommendationservice` 8081, `shippingservice` 50051, `emailservice` 8080 (su `Service` aún publica 5000, Tarea 8).
+- **Puertos** (iguales en desarrollo y producción): `frontend` 8082, `paymentservice` 50052, `recommendationservice` 8081, `shippingservice` 50051, `emailservice` 8080 (en `kustomize/base` su `Service` aún publica 5000, Tarea 8).
 - **Errores gRPC**, iguales en todos los servicios: petición inválida → `InvalidArgument`; estado del sistema (carrito vacío) → `FailedPrecondition`; dependencia caída o saturada → `Unavailable`; otro fallo → `Internal`. Excepciones: `NotFound` en `productcatalogservice` y `DeadlineExceeded`/`Canceled` en `checkoutservice` solo cuando vence o se cancela el contexto del llamante. El código de una dependencia nunca se reenvía y nunca viaja una traza al cliente. `frontend` traduce a HTTP con la tabla de `google/rpc/code.proto`; en un 5xx muestra un mensaje genérico y el *request ID*.
 - **Plazos:** `frontend` corta cada petición a `REQUEST_TIMEOUT` (por defecto `5s`) y el plazo se propaga por toda la cadena. Sin reintentos automáticos en ningún cliente ni en el mesh.
 - **Apagado ordenado con SIGTERM** en los 10 servicios: dejan de aceptar peticiones, el health check pasa a `NOT_SERVING`, terminan las peticiones en curso en 10 s (por debajo de los 30 s de Kubernetes) y cortan el resto.
@@ -228,7 +228,7 @@ Gotchas:
 Aquí se hace el grueso del aprendizaje de Kubernetes (semanas 1-6), con YAML a mano antes de Kustomize.
 
 - Clúster `kind` **multinodo** (1 control plane + 3 workers) con **Cilium** como CNI, el mismo dataplane que AKS (Tarea 7), para que las NetworkPolicies y sus métricas se comporten igual en local y en la nube. Comprobar que la máquina aguanta 4 nodos más Prometheus. **Hecho en `kind/`** (`up.sh`). **Versiones de AKS, no las últimas** (ADR 0001): Kubernetes 1.36 (GA en AKS hasta junio de 2027) y Cilium 1.19, el que AKS usa en 1.36. Sin kube-proxy, enrutado nativo, Hubble y L7 desactivados (en AKS vienen con ACNS) y los ajustes que pide Istio ya puestos.
-- Las imágenes de `kustomize/base` siguen siendo las de Google: construir las propias y cargarlas con `kind load docker-image`.
+- **Imágenes propias:** `kind/load-images.sh` construye las 10 de producción y las carga en los nodos con `kind load docker-image` (`boutique/<servicio>:local`). Las usa `kubernetes-manifests/`; `kustomize/base` sigue con las de Google hasta la Tarea 8.
 - Cada bloque de temas termina con su nota en `docs/notas/` y su fallo provocado: workloads y ciclo de vida; recursos y QoS (throttling, OOM); scheduling (taints, affinity, PDB, `drain`); red (Services, CoreDNS, NetworkPolicy, Cilium); seguridad (RBAC, PSA, Kyverno).
 - Validar los 4 overlays: los 10 servicios y `redis-cart` sanos; las NetworkPolicies bloquean lo no autorizado (acceso a Redis desde un pod sin permiso) y dejan pasar lo legítimo; un pod que excede `LimitRange`/`ResourceQuota` es rechazado.
 - Ejecutar `e2e/smoke.js` y `e2e/cart-concurrent.js` en cada namespace con el Job preparado (`kubectl apply -k e2e -n <namespace>`, ver `e2e/README.md`) y una prueba de humo de la inyección de fallos y de la carga.
@@ -288,9 +288,9 @@ Se dispara en cada PR, con dos tracks en paralelo. **Todo se ejecuta en Docker, 
 
 Componentes `security` y `resilience` y los 4 overlays A-D (ver sección 1); cada overlay fija su `namespace:`. La configuración común del mesh (inyección del sidecar en el namespace, reintentos a 0, recursos del proxy) va en `base` o en un componente que incluyen los 4; el circuit breaker, en `resilience`; mTLS `STRICT` y `AuthorizationPolicy`, en `security`. Las NetworkPolicy de `security` permiten el tráfico del mesh.
 
-**Pendientes en los manifiestos** (`kustomize/base` y `kubernetes-manifests/` siguen como en el original):
+**Pendientes en los manifiestos** (`kustomize/base` sigue como en el original; `kubernetes-manifests/`, el YAML crudo del despliegue a mano en `kind`, ya tiene las imágenes propias, `redis-cart` fijado por digest, el puerto de `emailservice` igualado y nada del `loadgenerator` ni de las variables sin uso):
 - **Quitar el `loadgenerator` (Locust):** la base lo despliega y metería carga no controlada en todos los escenarios.
-- **Quitar variables y endpoints sin uso:** `DISABLE_PROFILER`/`ENABLE_PROFILER` en `kubernetes-manifests/` y `kustomize/base/` de 7 servicios; `SHOPPING_ASSISTANT_SERVICE_ADDR` en `frontend`.
+- **Quitar variables y endpoints sin uso:** `DISABLE_PROFILER`/`ENABLE_PROFILER` en `kustomize/base/` de 7 servicios; `SHOPPING_ASSISTANT_SERVICE_ADDR` en `frontend`.
 - **Imágenes:** usar las propias, de ACR; fijar `redis-cart` a `redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0` (igual que `compose.yaml`); quitar `kustomize/base/**` de los `ignorePaths` de Renovate.
 - **`redis-cart`** (igual en los 4): `--save ""` (sin instantáneas RDB: el `fork()` bajo carga da picos de latencia y riesgo de OOMKilled) y `--maxmemory` (p. ej. 200mb, por debajo del límite del pod) con `volatile-lru`. Sin `fork` no hace falta `vm.overcommit_memory`.
 - **`REQUEST_TIMEOUT` explícito en `frontend`**, igual en los 4.

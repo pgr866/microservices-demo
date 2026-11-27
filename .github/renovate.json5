@@ -31,5 +31,11 @@
       matchPackageNames: ['kindest/node'],
       enabled: false,
     },
+    {
+      // Built locally by kind/load-images.sh for kubernetes-manifests/: in no
+      // registry, and the same name on Docker Hub isn't ours.
+      matchPackageNames: ['boutique/*'],
+      enabled: false,
+    },
   ],
 }

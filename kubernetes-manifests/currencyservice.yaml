@@ -43,15 +43,15 @@ spec:
               - ALL
           privileged: false
           readOnlyRootFilesystem: true
-        image: currencyservice
+        # Built and loaded into the nodes by kind/load-images.sh: never pulled.
+        image: boutique/currencyservice:local
+        imagePullPolicy: Never
         ports:
         - name: grpc
           containerPort: 7000
         env:
         - name: PORT
           value: "7000"
-        - name: DISABLE_PROFILER
-          value: "1"
         readinessProbe:
           grpc:
             port: 7000
