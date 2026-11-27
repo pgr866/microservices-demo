@@ -8,7 +8,7 @@ Each fault is provoked on purpose in the kind cluster, diagnosed and written dow
 |---|---|---|---|
 | 1 | [CrashLoopBackOff](#1-crashloopbackoff) | Workloads | Done |
 | 2 | [Misconfigured probe](#2-misconfigured-probe) | Workloads | Done |
-| 3 | Forced pod kill | Workloads | |
+| 3 | [Forced pod kill](#3-forced-pod-kill) | Workloads | Done |
 | 4 | gRPC reconnect backoff | Workloads | |
 | 5 | `OOMKilled` | Resources | |
 | 6 | `Pending` for quota or resources | Resources | |
@@ -68,3 +68,37 @@ kubectl patch deployment productcatalogservice -n boutique \
 - For `adservice`, `logs --previous` is empty (killed before it wrote a line) and the exit code is 143: the kubelet stopped it, the app didn't fail.
 
 **Fix:** the right port, and for a slow start a startup probe instead of a long `initialDelaySeconds`. With `startupProbe` (gRPC every 2 s, up to 30 failures, so 60 s to start) in front of the same aggressive liveness probe, `adservice` started with no restarts. It still took 25 s to get ready, though it listened at 7 s: its readiness probe waits 20 s before the first check and then checks every 15 s. Until a pod is marked ready it gets no traffic, even if it could already serve, and that adds to the recovery time when it replaces a pod that died (fault 3; probe review, Task 9).
+
+## 3. Forced pod kill
+
+E2 will kill a pod the way Chaos Mesh does, deleting it with no grace period. Here it is next to a normal delete and a crash, on `productcatalogservice` (Go, one replica), and on `frontend`:
+
+| How | What the app got | Recovery | The user saw |
+|---|---|---|---|
+| `kubectl delete pod` | SIGTERM: it drained and exited with 0 in under 0.5 s | New pod, ready in ~1 s | 503 for 2.6 s, 2.4 s |
+| `kubectl delete pod --grace-period=0 --force` | SIGTERM as well, exit code 0 | New pod, ready in ~1 s | 503 for 2.7 s, 1.0 s |
+| `kill -9` of the process, from the node | Nothing: exit code 137 | The same pod restarted its container in 0.6 s, same IP | 503 for 1.0 s |
+| `kubectl delete pod` of `frontend` | SIGTERM | New pod, ready in 12 s (`initialDelaySeconds: 10` of its readiness probe) | No answer for 12.0 s, 11.3 s |
+
+```sh
+kubectl delete pod <pod> -n boutique --grace-period=0 --force
+docker exec <node> crictl inspect -o go-template --template '{{.info.pid}}' <container-id>   # then: docker exec <node> kill -9 <pid>
+```
+
+**`--grace-period=0` is not a SIGKILL.** It removes the pod from the API at once, without waiting for the kubelet, so the ReplicaSet creates the new pod at once too. On the node, though, the kubelet still sends SIGTERM and gives the process a short grace period (2 s here) before SIGKILL. Our services drain in milliseconds, so for them it is the same as a normal delete. A crash the app doesn't see coming is a SIGKILL of the process (Chaos Mesh's `container-kill`), and Kubernetes recovers from it in another way: the same pod restarts its container, with no new pod and no new IP.
+
+**The user waits longer than Kubernetes.** The new pod was ready in ~1 s, but the user got errors for 1.0 or 2.6 s: the steps of the reconnect backoff of `frontend`'s gRPC client (1 s, then 1.6 s more; fault 4). The two recovery times of the experiment, until the pod is ready and until the user is served, already differ here.
+
+**The old pod closes too early.** On SIGTERM the app stops listening at once, while for a few milliseconds Cilium still sends it new connections, which are refused. That is why 4 of 5 rollouts cost the user 1.0 s of 503, though the new pod was already ready. A `preStop` pause keeps the old pod serving while it is taken out of the Service (`lifecycle.preStop.sleep.seconds: 5`, with 30 s of grace):
+
+| With the pause | The user saw |
+|---|---|
+| Rollout | Nothing (2 of 2) |
+| `kubectl delete pod`, with one replica | Nothing (2 of 2): the old pod served during the pause while the new one got ready |
+| `--grace-period=0 --force` | One request failed after 1.2-1.7 s (2 of 2). The kubelet cut the pause after ~1 s, sent SIGTERM, and SIGKILL 2 s later (exit code 137): the app didn't finish draining in time |
+
+The pause belongs to the resilience factor (C and D); a forced kill skips it, which is what E2 wants.
+
+**`terminationGracePeriodSeconds`:** seven services had 5 s. The apps stop in milliseconds, so 5 s cut nothing here, but it left no room: the code waits up to 10 s for calls in flight, sized for the 30 s default, and a `preStop` pause counts within the grace period. The manifests now leave the 30 s default in the ten services. It is a limit, not a wait, so it delays nothing.
+
+**Java exits with 143.** `adservice` ends with exit code 143 on every stop, also when its shutdown finishes cleanly: it is what the JVM returns after SIGTERM. While the old pod is removed, `kubectl get pods` shows it as `Error`, which is not a failure.

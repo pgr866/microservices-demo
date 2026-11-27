@@ -15,8 +15,17 @@ spec:
     - name: k6
       # The same k6 as the end-to-end tests (e2e/job.yaml).
       image: grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
-      # Only the lines of watch.js: no progress bar, no summary.
-      args: ["run", "--quiet", "--summary-mode=disabled", "--log-format=raw", "--no-color", "watch.js"]
+      # Only the lines of watch.js: no progress bar, no summary, and none of k6's own logs, which
+      # include a "Request Failed" warning for each request without an answer.
+      args:
+        - run
+        - --quiet
+        - --summary-mode=disabled
+        - --no-color
+        - --log-format=raw
+        - --console-output=/dev/stdout
+        - --log-output=none
+        - watch.js
       workingDir: /watch
       env:
         - name: BASE_URL
