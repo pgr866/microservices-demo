@@ -75,7 +75,7 @@ Cada factor es un *component* de Kustomize; cada escenario, un overlay con su na
 ## 2. Estado actual y calendario
 
 - ✅ **Tareas 1-3:** fork limpio, los 10 microservicios puestos a punto en local y tests de punta a punta en `e2e/` (falta engancharlos al CI). Detalle en la sección 3. Código de servicios **congelado**: no se añade nada nuevo.
-- 🔄 **Tarea 4:** en curso. Hecho: clúster `kind` con Cilium (`kind/`).
+- 🔄 **Tarea 4:** en curso. Hecho: clúster `kind` con Cilium (`kind/`) y la tienda desplegada a mano con YAML crudo (`kubernetes-manifests/`) e imágenes propias, con el Job de `e2e/` en verde dentro del clúster.
 - ⏳ **Tareas 5-14:** diseñadas, sin implementar.
 - **Ramas:** una por bloque de trabajo (una tarea corta, o un tema de una larga como la 4: clúster, workloads, recursos…), para que cada PR sea pequeña y `main` avance cada pocos días. Se crea desde `main` y se fusiona por PR con *merge commit* (sin squash, para conservar sus commits); `main` no recibe commits directos.
 - **Orden:** todo lo que no cuesta dinero primero (`kind`, CI, `terraform plan`). El primer `terraform apply` va en la semana 7; antes solo se crean, con `az`, el almacenamiento del estado y la identidad OIDC (Tarea 5).
@@ -296,6 +296,7 @@ Componentes `security` y `resilience` y los 4 overlays A-D (ver sección 1); cad
 - **`REQUEST_TIMEOUT` explícito en `frontend`**, igual en los 4.
 - **Requests y limits:** la base los trae en todos los Deployments; pasan al componente de seguridad (ver sección 1).
 - **Límite de streams gRPC por conexión:** grpc-go y grpc-js no lo limitan por defecto, pero `frontend` usa una sola conexión por servicio, así que un límite bajo sesgaría la latencia. Si se aplica, generoso (~1000), igual en los 4 y medido antes en `kind`.
+- **`terminationGracePeriodSeconds`:** 7 servicios traen 5 s (también en `kubernetes-manifests/`), menos que los 10 s que el código espera a las peticiones en curso, así que Kubernetes los mata antes de terminarlas. Se provoca y se mide en el bloque de ciclo de vida antes de fijar el valor, igual en los 4 escenarios.
 - **Memoria de la JVM de `adservice`:** el heap por defecto es el 25 % del límite. Si con carga no basta, `-XX:MaxRAMPercentage=75` vía `JAVA_OPTS` (no `JAVA_TOOL_OPTIONS`: escribe una línea que no es JSON).
 - **`emailservice`:** igualar el puerto del `Service` a 8080.
 - **`frontend-external` (LoadBalancer)** expone `frontend` por HTTP por fuera del Gateway: activar `components/non-public-frontend` en los 4 cuando exista el Gateway.
