@@ -240,6 +240,9 @@ Aquí se hace el grueso del aprendizaje de Kubernetes (semanas 1-6), con YAML a 
 - Comprobar que las NetworkPolicy dejan pasar el tráfico del mesh (puertos del plano de control `istiod`, p. ej. 15012, y DNS) y el *scraping* de Prometheus a los sidecars (15090), y que los reintentos de Istio están a 0.
 - Con mTLS `STRICT` (B y D), comprobar que siguen llegando a `frontend` k6, el Job de `e2e/` (con sidecar nativo, para que el Job termine: con un sidecar clásico no acabaría nunca) y el Gateway.
 - Medir con carga, antes de decidir, los pendientes de la Tarea 8: memoria de la JVM de `adservice` y límite de streams gRPC.
+- **Hallazgos del despliegue a mano**, para el bloque de workloads, probes y ciclo de vida:
+  - **Espera de reconexión de gRPC:** con `cartservice` a 0 réplicas durante ~3,5 min, `frontend` y `checkoutservice` siguieron devolviendo `Unavailable` ~1-2 min después de que el pod nuevo estuviera `Ready`. Tras cada conexión fallida, el cliente gRPC espera más antes de reintentar (1 s × 1,6 por intento, hasta 120 s; valores por defecto, que ningún servicio cambia) y mientras tanto falla al instante con el último error. Separa los dos MTTR. Candidato al catálogo de fallos, sin mesh. Con 2 réplicas no debería darse, y con el sidecar probablemente desaparece (la app conecta con su proxy, que siempre acepta): comprobarlo en el bloque del mesh.
+  - **Liveness de `cartservice` justa:** al arrancar falló una vez con `timeout: health rpc did not complete within 1s` (el `timeoutSeconds` por defecto, con .NET en frío y 300m de CPU). No reinició, porque hacen falta 3 fallos seguidos, pero con carga podría. Para la revisión de probes (Tarea 9).
 - Argo CD en el mismo `kind` para validar el `ApplicationSet` (semana 8).
 
 ## Tarea 5 — Validación local de Terraform ⏳
@@ -296,7 +299,7 @@ Componentes `security` y `resilience` y los 4 overlays A-D (ver sección 1); cad
 - **`REQUEST_TIMEOUT` explícito en `frontend`**, igual en los 4.
 - **Requests y limits:** la base los trae en todos los Deployments; pasan al componente de seguridad (ver sección 1).
 - **Límite de streams gRPC por conexión:** grpc-go y grpc-js no lo limitan por defecto, pero `frontend` usa una sola conexión por servicio, así que un límite bajo sesgaría la latencia. Si se aplica, generoso (~1000), igual en los 4 y medido antes en `kind`.
-- **`terminationGracePeriodSeconds`:** 7 servicios traen 5 s (también en `kubernetes-manifests/`), menos que los 10 s que el código espera a las peticiones en curso, así que Kubernetes los mata antes de terminarlas. Se provoca y se mide en el bloque de ciclo de vida antes de fijar el valor, igual en los 4 escenarios.
+- **`terminationGracePeriodSeconds`:** 7 servicios traen 5 s (también en `kubernetes-manifests/`), menos que los 10 s que el código espera como máximo a las peticiones en curso. Puede que en la práctica no corte nada, porque `frontend` corta toda la cadena a los 5 s (`REQUEST_TIMEOUT`) y ninguna petición en curso dura más. Se mide en el bloque de ciclo de vida antes de fijar el valor, igual en los 4 escenarios.
 - **Memoria de la JVM de `adservice`:** el heap por defecto es el 25 % del límite. Si con carga no basta, `-XX:MaxRAMPercentage=75` vía `JAVA_OPTS` (no `JAVA_TOOL_OPTIONS`: escribe una línea que no es JSON).
 - **`emailservice`:** igualar el puerto del `Service` a 8080.
 - **`frontend-external` (LoadBalancer)** expone `frontend` por HTTP por fuera del Gateway: activar `components/non-public-frontend` en los 4 cuando exista el Gateway.
