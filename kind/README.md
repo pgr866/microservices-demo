@@ -50,6 +50,17 @@ kubectl delete namespace cilium-test-1
 
 The filter leaves out the tests that need the L7 proxy, which is disabled (see below). Run without it, each of those tests waits minutes for a policy that the agent rejects, and then fails.
 
+## Images
+
+The services run the production images built from `src/`, not Google's:
+
+```sh
+./kind/load-images.sh             # build the 10 images and load them into the nodes
+./kind/load-images.sh frontend    # only the services given
+```
+
+Each image is tagged `boutique/<service>:local`. The nodes are containers with their own container runtime, which can't see the images of the host's Docker, so `kind load docker-image` copies each image into every node. It copies them again on each run, even unchanged (with Docker's containerd image store, kind can't tell that a node already has them): after changing one service, pass only that one. The first build takes a few minutes; later ones reuse the Docker build cache.
+
 ## Cilium settings
 
 The reasons are in [`cilium-values.yaml`](cilium-values.yaml). In short:
