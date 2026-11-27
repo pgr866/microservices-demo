@@ -42,7 +42,9 @@ spec:
                 - ALL
             privileged: false
             readOnlyRootFilesystem: true
-          image: checkoutservice
+          # Built and loaded into the nodes by kind/load-images.sh: never pulled.
+          image: boutique/checkoutservice:local
+          imagePullPolicy: Never
           ports:
           - containerPort: 5050
           readinessProbe:
@@ -61,7 +63,7 @@ spec:
           - name: PAYMENT_SERVICE_ADDR
             value: "paymentservice:50052"
           - name: EMAIL_SERVICE_ADDR
-            value: "emailservice:5000"
+            value: "emailservice:8080"
           - name: CURRENCY_SERVICE_ADDR
             value: "currencyservice:7000"
           - name: CART_SERVICE_ADDR

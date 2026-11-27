@@ -19,11 +19,13 @@ on:
       - main
     paths:
       - 'helm-chart/**'
+      - 'kubernetes-manifests/**'
       - 'kustomize/**'
       - '.github/workflows/kubevious-manifests-ci.yaml'
   pull_request:
     paths:
       - 'helm-chart/**'
+      - 'kubernetes-manifests/**'
       - 'kustomize/**'
       - '.github/workflows/kubevious-manifests-ci.yaml'
 permissions:

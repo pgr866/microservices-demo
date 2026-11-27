@@ -44,7 +44,9 @@ spec:
                 - ALL
             privileged: false
             readOnlyRootFilesystem: true
-          image: frontend
+          # Built and loaded into the nodes by kind/load-images.sh: never pulled.
+          image: boutique/frontend:local
+          imagePullPolicy: Never
           ports:
           - containerPort: 8082
           readinessProbe:
@@ -80,13 +82,9 @@ spec:
             value: "checkoutservice:5050"
           - name: AD_SERVICE_ADDR
             value: "adservice:9555"
-          - name: SHOPPING_ASSISTANT_SERVICE_ADDR
-            value: "shoppingassistantservice:80"
           # # ENV_PLATFORM: local (default), gcp, aws, azure, onprem or alibaba
           # - name: ENV_PLATFORM
           #   value: "aws"
-          - name: ENABLE_PROFILER
-            value: "0"
           # - name: CYMBAL_BRANDING
           #   value: "true"
           # - name: FRONTEND_MESSAGE

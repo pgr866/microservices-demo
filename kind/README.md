@@ -40,6 +40,8 @@ kind delete cluster --name boutique
 
 `up.sh` creates the cluster if it doesn't exist and installs or updates Cilium, so it can run again after changing `cilium-values.yaml`. Until Cilium is up, the nodes stay `NotReady` and CoreDNS `Pending`: there is no CNI to give pods an IP.
 
+After a reboot, the nodes start again with Docker, and the pods restart within a minute. If Docker only starts on demand (`docker.socket` enabled, `docker.service` not), `kubectl` alone gets `connection refused`, since it doesn't use Docker: run any Docker command first (`docker ps`), or start Docker at boot with `sudo systemctl enable docker.service`.
+
 To check the network end to end (it deploys test pods to the `cilium-test-1` namespace, which stays afterwards):
 
 ```sh
@@ -49,6 +51,17 @@ kubectl delete namespace cilium-test-1
 ```
 
 The filter leaves out the tests that need the L7 proxy, which is disabled (see below). Run without it, each of those tests waits minutes for a policy that the agent rejects, and then fails.
+
+## Images
+
+The services run the production images built from `src/`, not Google's:
+
+```sh
+./kind/load-images.sh             # build the 10 images and load them into the nodes
+./kind/load-images.sh frontend    # only the services given
+```
+
+Each image is tagged `boutique/<service>:local`. The nodes are containers with their own container runtime, which can't see the images of the host's Docker, so `kind load docker-image` copies each image into every node. It copies them again on each run, even unchanged (with Docker's containerd image store, kind can't tell that a node already has them): after changing one service, pass only that one. The first build takes a few minutes; later ones reuse the Docker build cache.
 
 ## Cilium settings
 
