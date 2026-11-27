@@ -40,6 +40,8 @@ kind delete cluster --name boutique
 
 `up.sh` creates the cluster if it doesn't exist and installs or updates Cilium, so it can run again after changing `cilium-values.yaml`. Until Cilium is up, the nodes stay `NotReady` and CoreDNS `Pending`: there is no CNI to give pods an IP.
 
+After a reboot, the nodes start again with Docker, and the pods restart within a minute. If Docker only starts on demand (`docker.socket` enabled, `docker.service` not), `kubectl` alone gets `connection refused`, since it doesn't use Docker: run any Docker command first (`docker ps`), or start Docker at boot with `sudo systemctl enable docker.service`.
+
 To check the network end to end (it deploys test pods to the `cilium-test-1` namespace, which stays afterwards):
 
 ```sh
