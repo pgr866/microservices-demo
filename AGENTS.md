@@ -240,9 +240,9 @@ Aquí se hace el grueso del aprendizaje de Kubernetes (semanas 1-6), con YAML a 
 - Comprobar que las NetworkPolicy dejan pasar el tráfico del mesh (puertos del plano de control `istiod`, p. ej. 15012, y DNS) y el *scraping* de Prometheus a los sidecars (15090), y que los reintentos de Istio están a 0.
 - Con mTLS `STRICT` (B y D), comprobar que siguen llegando a `frontend` k6, el Job de `e2e/` (con sidecar nativo, para que el Job termine: con un sidecar clásico no acabaría nunca) y el Gateway.
 - Medir con carga, antes de decidir, los pendientes de la Tarea 8: memoria de la JVM de `adservice` y límite de streams gRPC.
-- **Hallazgos del despliegue a mano**, para el bloque de workloads, probes y ciclo de vida:
-  - **Espera de reconexión de gRPC:** con `cartservice` a 0 réplicas durante ~3,5 min, `frontend` y `checkoutservice` siguieron devolviendo `Unavailable` ~1-2 min después de que el pod nuevo estuviera `Ready`. Tras cada conexión fallida, el cliente gRPC espera más antes de reintentar (1 s × 1,6 por intento, hasta 120 s; valores por defecto, que ningún servicio cambia) y mientras tanto falla al instante con el último error. Separa los dos MTTR. Candidato al catálogo de fallos, sin mesh. Con 2 réplicas no debería darse, y con el sidecar probablemente desaparece (la app conecta con su proxy, que siempre acepta): comprobarlo en el bloque del mesh.
-  - **Liveness de `cartservice` justa:** al arrancar falló una vez con `timeout: health rpc did not complete within 1s` (el `timeoutSeconds` por defecto, con .NET en frío y 300m de CPU). No reinició, porque hacen falta 3 fallos seguidos, pero con carga podría. Para la revisión de probes (Tarea 9).
+- **Hallazgos del despliegue a mano**, ya medidos en el bloque de workloads (`docs/fault-catalog.md`). Lo que queda pendiente:
+  - **Espera de reconexión de gRPC** (fallo 4): tras quedarse un `Service` sin pods, el usuario sigue viendo 503 entre 19 s y 2 min después de que el pod nuevo esté `Ready` (el cliente gRPC espera cada vez más entre intentos, hasta 120 s). Separa los dos MTTR. En el bloque del mesh, comprobar si desaparece con el sidecar (la app conecta con su proxy, que siempre acepta).
+  - **Liveness de `cartservice` justa** (fallo 2): decidir en la Tarea 9 dónde va su arreglo.
 - **Decidir antes del piloto (semana 8) qué kill usa E2** (medido en el bloque de workloads, fallo 3 de `docs/fault-catalog.md`). `pod-kill` con `gracePeriod: 0` borra el pod de la API al momento, pero el kubelet aún manda SIGTERM y da ~2 s antes del SIGKILL: en A y B las apps se apagan en orden, igual que con un `delete` normal, y en C y D corta la pausa `preStop` a ~1 s. Un crash de verdad (SIGKILL sin aviso) es `container-kill`, que reinicia el contenedor en el mismo pod, sin pod nuevo ni IP nueva: mide otra recuperación. Ajustar E2 y «Fijado antes de medir» a lo que se elija.
 - Argo CD en el mismo `kind` para validar el `ApplicationSet` (semana 8).
 
@@ -308,7 +308,12 @@ Componentes `security` y `resilience` y los 4 overlays A-D (ver sección 1); cad
 
 ## Tarea 9 — Probes y autoescalado ⏳
 
-Revisar las probes (van en el componente de resiliencia). El HPA de `frontend` es una **demo aparte**, fuera del factorial (necesita requests y variaría la medida), con el Cluster Autoscaler activo. Si el `ResourceQuota` impide al HPA crear réplicas, es consecuencia de cómo se dimensionó: se dimensiona a propósito y se documenta, no se presenta como hallazgo.
+Revisar las probes (van en el componente de resiliencia). Medido en el bloque de workloads (fallos 2 y 4 de `docs/fault-catalog.md`):
+
+- **Las readiness tardan más que la app:** `cartservice` escucha a los ~4 s y está `Ready` a los 21-31 s, `adservice` a los 7 s y 25-31 s, `frontend` a los 12 s. Con 1 réplica, ese retraso se suma entero a la caída (E2). Una `startupProbe` con periodo corto en lugar de `initialDelaySeconds` lo recorta.
+- **Pendiente de decidir: la liveness de `cartservice`, ¿en la base o en resiliencia?** Su primera comprobación tras arrancar falla en 6 de 6 arranques con el límite de 300m (0 de 3 con 1 CPU): .NET en frío con *throttling*. No reinicia (hacen falta 3 fallos seguidos), pero va con un fallo de margen. Solo B y D llevan límites, así que si el arreglo (`startupProbe` o `timeoutSeconds` mayor) va en el componente de resiliencia, B se queda con una probe que roza el reinicio en cada arranque y su MTTR lo pagaría (H4b). Llevarlo a la base lo deja igual en los 4.
+
+El HPA de `frontend` es una **demo aparte**, fuera del factorial (necesita requests y variaría la medida), con el Cluster Autoscaler activo. Si el `ResourceQuota` impide al HPA crear réplicas, es consecuencia de cómo se dimensionó: se dimensiona a propósito y se documenta, no se presenta como hallazgo.
 
 ## Tarea 10 — Pipeline de CD ⏳
 

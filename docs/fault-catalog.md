@@ -9,7 +9,7 @@ Each fault is provoked on purpose in the kind cluster, diagnosed and written dow
 | 1 | [CrashLoopBackOff](#1-crashloopbackoff) | Workloads | Done |
 | 2 | [Misconfigured probe](#2-misconfigured-probe) | Workloads | Done |
 | 3 | [Forced pod kill](#3-forced-pod-kill) | Workloads | Done |
-| 4 | gRPC reconnect backoff | Workloads | |
+| 4 | [gRPC reconnect backoff](#4-grpc-reconnect-backoff) | Workloads | Done |
 | 5 | `OOMKilled` | Resources | |
 | 6 | `Pending` for quota or resources | Resources | |
 | 7 | `drain` of a node, with and without PDB | Scheduling | |
@@ -69,6 +69,22 @@ kubectl patch deployment productcatalogservice -n boutique \
 
 **Fix:** the right port, and for a slow start a startup probe instead of a long `initialDelaySeconds`. With `startupProbe` (gRPC every 2 s, up to 30 failures, so 60 s to start) in front of the same aggressive liveness probe, `adservice` started with no restarts. It still took 25 s to get ready, though it listened at 7 s: its readiness probe waits 20 s before the first check and then checks every 15 s. Until a pod is marked ready it gets no traffic, even if it could already serve, and that adds to the recovery time when it replaces a pod that died (fault 3; probe review, Task 9).
 
+**A right probe that is too tight: `cartservice`.** Nothing provoked: its probes use the default `timeoutSeconds: 1`, and the first health check after a start fails with `Liveness probe failed: timeout: health rpc did not complete within 1s`. The app listens 4 s after it starts, but .NET compiles the code of a call the first time it runs, and the CPU limit of 300m holds it back. It doesn't restart, since the liveness probe needs 3 failures in a row and the second one passes, but there is a single failure of margin. With a higher limit the failure goes away:
+
+| CPU limit | First liveness check failed | CPU periods throttled in the first ~40 s |
+|---|---|---|
+| 300m (the manifest) | 6 of 6 starts | 41-64 % |
+| 1 CPU | 0 of 3 starts | 7-10 % |
+
+Even with 1 CPU the first check took 0.5 to 1 s. The kubelet's probe metrics give the time of each check (failed ones aren't in the histogram, only in the counter):
+
+```sh
+kubectl get --raw /api/v1/nodes/<node>/proxy/metrics/probes | grep 'pod="<pod>"'    # prober_probe_duration_seconds, prober_probe_total
+kubectl get --raw /api/v1/nodes/<node>/proxy/metrics/cadvisor | grep 'pod="<pod>"' | grep cfs_   # throttled periods
+```
+
+In the experiment, only scenarios B and D set limits on the containers of the app, so only there would a cold start come this close to a restart.
+
 ## 3. Forced pod kill
 
 E2 will kill a pod the way Chaos Mesh does, deleting it with no grace period. Here it is next to a normal delete and a crash, on `productcatalogservice` (Go, one replica), and on `frontend`:
@@ -102,3 +118,30 @@ The pause belongs to the resilience factor (C and D); a forced kill skips it, wh
 **`terminationGracePeriodSeconds`:** seven services had 5 s. The apps stop in milliseconds, so 5 s cut nothing here, but it left no room: the code waits up to 10 s for calls in flight, sized for the 30 s default, and a `preStop` pause counts within the grace period. The manifests now leave the 30 s default in the ten services. It is a limit, not a wait, so it delays nothing.
 
 **Java exits with 143.** `adservice` ends with exit code 143 on every stop, also when its shutdown finishes cleanly: it is what the JVM returns after SIGTERM. While the old pod is removed, `kubectl get pods` shows it as `Error`, which is not a failure.
+
+## 4. gRPC reconnect backoff
+
+**Provoked:** `cartservice` scaled to 0 and, a while later, back to 1.
+
+```sh
+kubectl scale deployment/cartservice -n boutique --replicas=0
+kubectl scale deployment/cartservice -n boutique --replicas=1
+```
+
+| `cartservice` gone for | Pod ready after scaling up | User served again, after the pod was ready | 503 in total |
+|---|---|---|---|
+| 26 s | 22 s | 18.8 s later | 66.9 s |
+| 210 s | 22 s | 40.4 s later | 271.8 s |
+| ~3.5 min (hand deploy, Task 4) | | 1-2 min later | |
+
+**Why:** `frontend` keeps one gRPC connection per service, to its ClusterIP. With no pod behind it, Cilium refuses the connection (`dial tcp 10.96.136.193:7070: connect: connection refused`). After each failed attempt the client waits longer before the next one (1 s, then 1.6 times more each time, with some randomness, up to 120 s: the gRPC defaults, which no service changes), and in between every call fails at once with the last error, without trying. When the pod comes back, no one tries again until the current wait runs out, so the longer the outage, the longer the errors last after it: up to 2 min with the service up. The same backoff, at its first steps, is behind the 1.0 and 2.6 s of faults 2 and 3: one or two refused attempts.
+
+**Signals:** the pod is ready and its logs show no requests, while `frontend` keeps logging `Unavailable` with `connection refused` to the ClusterIP. Kubernetes counts the service as recovered; the user doesn't.
+
+**What changes it:**
+
+- Two replicas (the resilience factor): a single dead pod no longer leaves the Service empty.
+- The mesh: the app connects to its own sidecar, which always accepts. To check in the mesh block.
+- Not the code: the clients could shorten the backoff (`grpc.WithConnectParams`), but the services are frozen, and the experiment measures the defaults.
+
+For the experiment, this backoff is the gap between its two recovery times, until the pod is ready and until the user is served. The pod took 22 s to get ready while it listened after ~4 s: `initialDelaySeconds: 15` of its readiness probe and then a check every 10 s (probe review, Task 9).
