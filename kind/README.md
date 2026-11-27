@@ -63,6 +63,24 @@ The services run the production images built from `src/`, not Google's:
 
 Each image is tagged `boutique/<service>:local`. The nodes are containers with their own container runtime, which can't see the images of the host's Docker, so `kind load docker-image` copies each image into every node. It copies them again on each run, even unchanged (with Docker's containerd image store, kind can't tell that a node already has them): after changing one service, pass only that one. The first build takes a few minutes; later ones reuse the Docker build cache.
 
+## Watch the shop
+
+[`watch/`](watch/watch.js) is a single user, a k6 pod in the namespace of the shop, who loads a product page ten times a second and prints a line each time the answer changes. It shows how long the shop was down, as a user saw it, while a pod is deleted, rolled out or scaled:
+
+```sh
+kubectl apply -k kind/watch -n boutique
+kubectl logs -f watch -n boutique          # Ctrl+C stops reading; the pod keeps watching
+kubectl delete -k kind/watch -n boutique
+```
+
+```text
+19:00:14.192  200
+19:00:34.979  503  after 20.8 s of 200 (186 requests)
+19:00:35.992  200  after 1.0 s of 503 (10 requests)
+```
+
+Each line is the time (UTC, like the logs of the services) of the first request that got a new answer. `0` means no HTTP answer at all, with the error. The page needs `productcatalogservice`, `currencyservice` and `cartservice`; without `adservice` or `recommendationservice` it still answers 200. It is a tool for these hand experiments, not the measurement of the campaign: with a single user, a hung request delays the next ones.
+
 ## Cilium settings
 
 The reasons are in [`cilium-values.yaml`](cilium-values.yaml). In short:

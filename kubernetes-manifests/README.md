@@ -18,6 +18,24 @@ The manifests set no namespace, so `-n` chooses where they go. To remove the sho
 
 After loading a new image, the running pods keep the old one: `kubectl rollout restart deployment/<service> -n boutique` replaces them.
 
+## Change and roll back
+
+Any change to the pod template of a Deployment (image, env, probes, resources) is a rollout: a new ReplicaSet starts the new pods, and the old one is scaled to 0 and kept to roll back to. With one replica, the new pod starts first and the old one stops once the new one is ready.
+
+```sh
+kubectl rollout status deployment/frontend -n boutique     # waits; fails if the rollout doesn't progress within 10 min
+kubectl rollout history deployment/frontend -n boutique
+kubectl rollout undo deployment/frontend -n boutique       # back to the previous revision
+```
+
+A rollout that gets stuck (an image that doesn't exist, a pod that never gets ready) leaves the old pods serving, but Kubernetes never rolls it back by itself.
+
+A change made with `kubectl set`, `kubectl patch` or `rollout undo` stays out of git, and `kubectl apply` doesn't undo it: apply only removes what an earlier apply put there, so `kubectl diff` shows nothing either. To bring a service back to the YAML of the repo:
+
+```sh
+kubectl replace -n boutique -f kubernetes-manifests/frontend.yaml
+```
+
 ## Open the shop
 
 ```sh

@@ -1,0 +1,13 @@
+# A user who watches the shop of its namespace. See ../README.md#watch-the-shop.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs:
+      app: watch
+    includeSelectors: false
+resources:
+  - pod.yaml
+configMapGenerator:
+  - name: watch-script
+    files:
+      - watch.js
