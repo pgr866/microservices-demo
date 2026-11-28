@@ -46,7 +46,7 @@ Three lessons come out of it:
 
 1. **"Successfully rolled out" only means the new pods got ready once.** A wrong liveness probe passes the rollout and restarts the pod afterwards. A wrong readiness probe, or a crash at start, stops the rollout before it does harm.
 2. **Kubernetes recovers before the user does.** The readiness delays (`initialDelaySeconds`: 10 s in `frontend`, 15 s in `cartservice`, 20 s in `adservice`) and the reconnect backoff of the gRPC clients come on top of the time a pod takes to start. Every 1.0 s and 2.6 s in the table is one or two refused reconnect attempts (1 s, then 1.6 s more).
-3. **Changes made with `kubectl set`, `kubectl patch` or `rollout undo` drift from git without a trace.** `kubectl apply` only removes what an earlier apply put there, so `kubectl diff` shows nothing and the change stays; `kubectl replace -f` brings back the manifest. This is the job Argo CD will do (Task 13).
+3. **Changes made with `kubectl set`, `kubectl patch` or `rollout undo` drift from git, and part of the drift leaves no trace.** `kubectl apply` merges three versions (the file, the last one applied and the live object) and only removes what an earlier apply put there: a field the file writes is put back (a changed port, a removed variable), and `kubectl diff` shows it; a field the file doesn't write (an added variable, a probe interval left at its default) stays, and `kubectl diff` shows nothing. `kubectl replace -f` writes the whole manifest and brings it back. Argo CD diffs and syncs with the same three-way merge by default, so whether it sees the second kind is to be checked in Task 13.
 
 ## How it is measured
 

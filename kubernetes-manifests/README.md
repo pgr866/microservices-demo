@@ -30,7 +30,7 @@ kubectl rollout undo deployment/frontend -n boutique       # back to the previou
 
 A rollout that gets stuck (an image that doesn't exist, a pod that never gets ready) leaves the old pods serving, but Kubernetes never rolls it back by itself.
 
-A change made with `kubectl set`, `kubectl patch` or `rollout undo` stays out of git, and `kubectl apply` doesn't undo it: apply only removes what an earlier apply put there, so `kubectl diff` shows nothing either. To bring a service back to the YAML of the repo:
+A change made with `kubectl set`, `kubectl patch` or `rollout undo` stays out of git. `kubectl apply` and `kubectl diff` see it only if it touches a field written in the YAML (a changed port, a removed variable); a field the YAML doesn't write (an added variable, a probe interval left at its default) stays and doesn't show, because apply only removes what an earlier apply put there. To bring a service back to the YAML of the repo:
 
 ```sh
 kubectl replace -n boutique -f kubernetes-manifests/frontend.yaml

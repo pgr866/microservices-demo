@@ -353,6 +353,8 @@ k6 (carga + usuario testigo, partiendo de `e2e/lib/shop.js`), Chaos Mesh (E2 y E
 
 **Argo CD, no Flux** (por su interfaz web para la defensa y `ApplicationSet` para la misma app con varios overlays), instalado dentro del mismo clúster, en el pool `sistema`. Un `ApplicationSet` con generador de lista despliega los 4 overlays. Terraform sigue siendo push. Es **parte del núcleo**: el CD y el experimento dependen de él.
 
+Comprobar si Argo CD ve un campo añadido a mano que no está en git (p. ej. `kubectl set env ... LOG_LEVEL=debug`): `kubectl diff` no lo ve (bloque de workloads) y el diff por defecto de Argo CD es el mismo de 3 vías; si tampoco lo ve, decidir si se usa `Replace=true` en los overlays.
+
 Durante la campaña, `ignoreDifferences` sobre `replicas` (o sincronización manual) para que el `selfHeal` no deshaga el escalado a 0 de los namespaces que no se miden. Los charts de Helm sí se usan (Argo CD, con `helm_release` desde Terraform; el resto, desde el *app-of-apps*); la carpeta `helm-chart/` no.
 
 ## Tarea 14 — Observabilidad (Prometheus + Grafana) ⏳
